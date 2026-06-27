@@ -56,7 +56,9 @@ export async function reasonOverEvidence(bundle: EvidenceBundle): Promise<Verdic
     return base('abstain', bundle.items.map((i) => i.id), reason, 0.2, reason);
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+  // Route through global fetch: the SDK's bundled HTTP layer "Premature close"-es on tool_use
+  // responses inside the Fly VM, while global undici fetch works. Verified on the deployed host.
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
   let parsed: { verdict: VerdictLabel; confidence: number; cited_evidence: string[]; rationale: string; abstain_reason?: string };
   try {
     const res = await client.messages.create({
