@@ -1,0 +1,35 @@
+app = "verdikt-worker"
+primary_region = "iad"
+
+[build]
+
+# Real ext4 block device for the Docker daemon: enables fast overlay2 (vfs deep-copies every
+# layer and is unusably slow) AND persists the verdikt-runner image across restarts (built once).
+[mounts]
+  source = "verdikt_docker"
+  destination = "/var/lib/docker"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[http_service.concurrency]
+  type = "requests"
+  soft_limit = 20
+  hard_limit = 40
+
+[checks.health]
+  type = "http"
+  port = 8080
+  method = "get"
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "600s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

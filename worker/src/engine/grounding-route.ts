@@ -26,7 +26,8 @@ export async function runGroundingRoute(acceptance: Acceptance, artifact: Artifa
     return { route: 'answer', items: [], routeError: 'payer provided no sources' };
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+  // See reasoner.ts: route through global fetch to avoid the SDK's "Premature close" on Fly.
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
 
   let toolInput: { key_claim: string; label: string; supporting_span: string };
   try {

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Acceptance, Artifact, EvidenceBundle, EvidenceItem } from '../types.js';
@@ -50,6 +50,11 @@ export async function runCodeRoute(acceptance: Acceptance, artifact: Artifact): 
     // Payer's tests + the worker's solution land in the same workspace; pytest imports the solution.
     await writeFile(join(dir, 'payer_test.py'), acceptance.tests, 'utf8');
     await writeFile(join(dir, 'solution.py'), artifact.payload, 'utf8');
+    // mkdtemp creates the dir 0700 (owner only). The sandbox image runs as a non-root
+    // `runner` user, so on native Linux it cannot traverse a root-owned 0700 bind mount and
+    // sees no files (empty evidence -> wrong abstain). macOS Docker Desktop masks this by
+    // remapping mount perms. 0755 lets the runner read the read-only workspace.
+    await chmod(dir, 0o755);
 
     let stdout: string;
     try {
