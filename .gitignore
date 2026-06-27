@@ -1,0 +1,57 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+.next/
+dist/
+out/
+*.log
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+fixtures/**/node_modules/
+web/tsconfig.tsbuildinfo
+
+# Local
+.DS_Store
+.vercel
+.fly/
+
+# Project working docs (kept on disk, not published)
+PRD.md
+ARCHITECTURE.md
+PLAN.md
+PULSE.md
+FEATURE-OBSERVABLES.md
+DEEP-RESEARCH.md
+DOMAIN-GUIDE.md
+DESIGN_BRIEF.md
+DESIGN_SYSTEM.md
+concerns.md
+config.json
+intel-state.json
+pipeline-log.md
+*-REPORT.md
+STRESS-TEST-PLAN.md
+.pipeline-progress.log
+.watchdog-last-alert
+.codebase-manifest.md
+.*-state.json
+.conductor-state.json.bak
+.conductor-resume.md
+.conductor-lock/
+warroom/
+research/
+debug-results/
+docs/context/
+docs/prompts/
+tasks/
+ai/
+design/
+screenshots/
+submission/

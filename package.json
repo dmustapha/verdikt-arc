@@ -1,0 +1,10 @@
+{
+  "name": "verdikt-arc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Verdikt(Arc): escrow + evidence-anchored AI verdict + release/refund/slash for agent work on Arc.",
+  "scripts": {
+    "test": "bash scripts/run-root-tests.sh",
+    "test:worker": "cd worker && npm test"
+  }
+}

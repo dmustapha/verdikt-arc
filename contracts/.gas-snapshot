@@ -1,0 +1,8 @@
+VerdiktEscrowTest:testAbstainRefundsToPayer() (gas: 150537)
+VerdiktEscrowTest:testBadOutcomeReverts() (gas: 146366)
+VerdiktEscrowTest:testCannotDoubleFund() (gas: 143218)
+VerdiktEscrowTest:testCannotDoubleSettle() (gas: 175631)
+VerdiktEscrowTest:testFundLocksUsdc() (gas: 144393)
+VerdiktEscrowTest:testOnlyVerdictCanSettle() (gas: 144305)
+VerdiktEscrowTest:testSettleRefundToPayer() (gas: 150595)
+VerdiktEscrowTest:testSettleReleaseToWorker() (gas: 177157)

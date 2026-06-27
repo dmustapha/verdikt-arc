@@ -1,0 +1,22 @@
+{
+  "name": "verdikt-web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@vercel/postgres": "^0.10.0",
+    "next": "^15.5.19",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.5.0"
+  }
+}

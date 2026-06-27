@@ -1,0 +1,23 @@
+{
+  "colors": {
+    "primary": "#34d399",
+    "secondary": "#c9953a",
+    "accent": "#34d399",
+    "court": "#c9953a",
+    "background": "#06060b",
+    "surface": "#111119",
+    "text": "#eaeaf2"
+  },
+  "semantic": {
+    "release": "#34d399",
+    "refund": "#f87171",
+    "abstain": "#fbbf24",
+    "floor": "#a78bfa"
+  },
+  "fonts": { "heading": "Cormorant Garamond", "body": "Space Grotesk", "mono": "JetBrains Mono" },
+  "logoPath": "web/src/app/icon.svg",
+  "darkMode": true,
+  "world": "The clearing house where code is judged",
+  "designLanguage": "verdikt-adapted (Cormorant judicial serif + emerald primary + gold-for-the-Court) at RefiRail craft, multi-route (/ landing · /courtroom · /proof · /ledger)",
+  "shadowPhilosophy": "pure-glow (emerald focal + reserved gold court-glow)"
+}
