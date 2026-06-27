@@ -1,0 +1,38 @@
+import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import { verdictRouter } from './routes/verdict.js';
+import { streamRouter } from './routes/stream.js';
+import { demoRouter } from './routes/demo.js';
+
+const app = express();
+app.use(express.json({ limit: '1mb' }));
+// Restrict money-moving routes to the known web origin. The SSE stream route (read-only)
+// sets its own `*` header. WEB_ORIGIN unset falls back to `*` for local dev only.
+app.use((_, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', process.env.WEB_ORIGIN ?? '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Payment-Signature,X-Payment,X-Demo-Secret');
+  next();
+});
+
+app.get('/health', (_req, res) => res.json({ ok: true, service: 'verdikt-worker' }));
+app.use(verdictRouter);
+app.use(streamRouter);
+app.use(demoRouter);
+
+// JSON error handler. Replaces Express's default HTML error page (which leaks
+// absolute file paths and a stack trace in the body). Malformed JSON bodies from
+// the body parser surface as a SyntaxError with `status` 400 → clean 400 JSON;
+// anything else → clean 500 JSON. Never exposes internals to clients.
+app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  const badJson = err.type === 'entity.parse.failed' || (err.status === 400 && err instanceof SyntaxError);
+  if (badJson) { res.status(400).json({ error: 'malformed JSON body' }); return; }
+  // Oversize body: the parser rejected it before any handler ran (never processed),
+  // so answer with the correct 413 instead of a generic 500 + console noise.
+  if (err.type === 'entity.too.large' || err.status === 413) { res.status(413).json({ error: 'payload too large' }); return; }
+  console.error('[verdikt-worker] unhandled error:', err);
+  res.status(500).json({ error: 'internal error' });
+});
+
+const port = parseInt(process.env.PORT ?? '8080', 10);
+app.listen(port, () => console.log(`[verdikt-worker] listening on :${port}`));

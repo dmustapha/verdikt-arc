@@ -1,0 +1,1 @@
+Arc finalizes blocks using a proof-of-work consensus and its native token is BTC.
