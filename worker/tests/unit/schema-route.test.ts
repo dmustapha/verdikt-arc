@@ -25,7 +25,14 @@ describe('runSchemaRoute', () => {
     const b = runSchemaRoute(acceptance, art('{ "symbol": "ETH", "price": 3421.55, "confidence": 0.92 }'));
     expect(b.route).toBe('tool_output');
     expect(b.routeError).toBeUndefined();
+    expect(b.items).toHaveLength(6); // 1D: has_body, valid_json, fields_present, schema_match, value_bounds, no_extra_fields
     expect(b.items.every((i) => i.status === 'pass')).toBe(true);
+  });
+
+  it('extra undeclared field fails no_extra_fields (strict matching)', () => {
+    const b = runSchemaRoute(acceptance, art('{ "symbol": "ETH", "price": 1, "confidence": 0.5, "leaked": "smuggled" }'));
+    expect(item(b, 'schema:no_extra_fields')?.status).toBe('fail');
+    expect(item(b, 'schema:no_extra_fields')?.detail).toContain('leaked');
   });
 
   it('bad output: schema_match fails (wrong type) and value_bounds fails (out of range)', () => {

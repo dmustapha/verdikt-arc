@@ -54,28 +54,45 @@ export async function runGroundingRoute(acceptance: Acceptance, artifact: Artifa
     return { route: 'answer', items: [], routeError: `grounding API error: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  // Post-match: the cited span must actually appear in the sources, else treat as unsupported.
-  const spanInSource =
-    toolInput.supporting_span.length > 0 &&
-    normalize(acceptance.sources).includes(normalize(toolInput.supporting_span));
+  // Deterministic entailment gate (V2 fix): a "supported" label from the model is NOT enough. The
+  // span must (a) appear VERBATIM in the sources, (b) be SUBSTANTIVE (≥6 content tokens, 24–400
+  // chars) so a trivial span like "the" cannot pass, and (c) actually COVER the claim (claim-token
+  // recall ≥ 0.5). The model proposes; these lexical checks dispose — so the route stops being
+  // "just an LLM" and a degenerate/injected model cannot certify a trivially-present span.
+  const span = toolInput.supporting_span ?? '';
+  const spanNorm = normalize(span);
+  const sourcesNorm = normalize(acceptance.sources);
 
-  const verified = toolInput.label === 'supported' && spanInSource;
+  const spanTokens = spanNorm.match(/[a-z0-9]+/g) ?? [];
+  const claimTokens = new Set(normalize(toolInput.key_claim).match(/[a-z0-9]+/g) ?? []);
+  const spanTokenSet = new Set(spanTokens);
+  const overlap = [...claimTokens].filter((t) => spanTokenSet.has(t)).length;
+  const claimRecall = claimTokens.size > 0 ? overlap / claimTokens.size : 0;
+
+  const verbatim = span.length > 0 && sourcesNorm.includes(spanNorm);
+  const substantive = spanTokens.length >= 6 && span.length >= 24 && span.length <= 400;
+  const coversClaim = claimRecall >= 0.5;
+  const verified = toolInput.label === 'supported' && verbatim && substantive && coversClaim;
+
+  const reason =
+    !verbatim ? 'span not found verbatim in sources'
+    : !substantive ? 'span too short to be substantive evidence'
+    : !coversClaim ? `span covers only ${Math.round(claimRecall * 100)}% of the claim tokens`
+    : toolInput.label !== 'supported' ? `model labeled the claim ${toolInput.label}`
+    : 'verified';
+
   const items: EvidenceItem[] = [{
     id: 'span:key_claim',
     kind: 'span',
     label: 'key claim grounding',
-    status: verified ? 'pass' : toolInput.label === 'uncertain' || !spanInSource ? 'info' : 'fail',
-    detail:
-      `claim: "${toolInput.key_claim.slice(0, 160)}" — label=${toolInput.label}` +
-      `, span ${spanInSource ? 'matched in sources' : 'NOT found in sources'}`,
-    ref: spanInSource ? toolInput.supporting_span.slice(0, 160) : undefined,
+    status: verified ? 'pass' : 'info',
+    detail: `claim: "${toolInput.key_claim.slice(0, 160)}" — label=${toolInput.label}, ${reason}`,
+    ref: verbatim ? span.slice(0, 160) : undefined,
   }];
 
-  // If the model was uncertain or the span did not verify, signal abstain to the reasoner.
-  const routeError =
-    !verified && (toolInput.label === 'uncertain' || !spanInSource)
-      ? 'claim not verifiably supported by provided sources'
-      : undefined;
+  // Abstain-heavy by design: anything short of a verified, substantive, claim-covering span signals
+  // abstain to the reasoner (refund-to-payer). False-certifying an answer is worse than none.
+  const routeError = verified ? undefined : `claim not verifiably supported: ${reason}`;
 
   return { route: 'answer', items, routeError };
 }

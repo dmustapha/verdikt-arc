@@ -59,6 +59,13 @@ export function runSchemaRoute(acceptance: Acceptance, artifact: Artifact): Evid
     }
     items.push(evItem('value_bounds', 'Value Bounds', violations.length === 0,
       violations.length === 0 ? 'within bounds' : violations.join('; ')));
+
+    // 6. NO_EXTRA_FIELDS (strict): reject any payload key not declared in the schema. A permissive
+    // route that ignores undeclared fields lets a worker smuggle unverified data past acceptance —
+    // strict matching is what makes the schema route the most reliable of the three.
+    const extras = Object.keys(parsed).filter((k) => !(k in schema));
+    items.push(evItem('no_extra_fields', 'No Extra Fields', extras.length === 0,
+      extras.length === 0 ? 'no undeclared fields' : `unexpected field(s): ${extras.join(', ')}`));
   }
 
   return { route: 'tool_output', items };

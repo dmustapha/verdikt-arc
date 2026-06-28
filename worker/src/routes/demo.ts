@@ -55,9 +55,14 @@ demoRouter.post('/api/demo/:type', async (req, res) => {
   const { workId } = req.body as { workId: `0x${string}` };
   if (!workId) { res.status(400).json({ error: 'workId required' }); return; }
 
-  const worker = (req.body.worker ?? process.env.DEMO_WORKER_ADDRESS) as `0x${string}`;
-  const payer = (req.body.payer ?? process.env.DEMO_PAYER_ADDRESS) as `0x${string}`;
-  const amountUsdc = (req.body.amountUsdc as number) ?? 1;
+  // M-2: this route moves REAL test USDC. NEVER honor client-supplied worker/payer (a caller could
+  // redirect a release to their own wallet) — use the env-fixed demo addresses only. Clamp the
+  // amount to a hard ceiling so a crafted body cannot drain the demo payer wallet.
+  const DEMO_MAX_USDC = Number(process.env.DEMO_MAX_USDC ?? 1);
+  const worker = process.env.DEMO_WORKER_ADDRESS as `0x${string}`;
+  const payer = process.env.DEMO_PAYER_ADDRESS as `0x${string}`;
+  const reqAmount = Number(req.body.amountUsdc);
+  const amountUsdc = Math.min(Number.isFinite(reqAmount) && reqAmount > 0 ? reqAmount : DEMO_MAX_USDC, DEMO_MAX_USDC);
 
   const { acceptance, artifact } = await scenario.load();
   let task = await getTask(workId);
