@@ -7,6 +7,17 @@ import { txUrl } from '../../lib/chains';
 
 const ESCROW = '0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5';
 
+// SSE goes direct to the Fly worker (dodges Vercel's function-duration cap on a proxied stream).
+// Falls back to the same-origin proxy if the env var is unset (e.g. local without it).
+const WORKER_BASE = process.env.NEXT_PUBLIC_WORKER_URL ?? '';
+
+// The client owns the workId so it can open the SSE BEFORE the run starts (non-secret bytes32).
+function randomWorkId(): `0x${string}` {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return ('0x' + Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')) as `0x${string}`;
+}
+
 type DemoType = 'good' | 'bad' | 'abstain' | 'schema' | 'schema-bad';
 
 // A narrated decision step in the courtroom log. E-3: render the worker's SSE events as
@@ -52,6 +63,7 @@ export function Courtroom() {
   const [running, setRunning] = useState(false);
   const [activeType, setActiveType] = useState<DemoType | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track whether a hard static finding (e.g. SQLi) was seen, so we can narrate the
   // deterministic floor blocking a release. Refs avoid stale-closure reads in onmessage.
   const sawStaticFail = useRef(false);
@@ -72,6 +84,7 @@ export function Courtroom() {
   // re-enable and onerror won't fire a spurious "interrupted" after a clean end.
   function stop() {
     runningRef.current = false; streamLive.current = false; setRunning(false);
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
     esRef.current?.close();
   }
 
@@ -81,29 +94,43 @@ export function Courtroom() {
     if (runningRef.current) return;
     runningRef.current = true;
     setItems([]); setSteps([]); setVerdict(null); setOutcome(undefined); setTxHash(null);
-    setStatus('starting…'); setRunning(true);
+    setStatus('connecting…'); setRunning(true);
     sawStaticFail.current = false;
 
-    let workId: string;
-    try {
-      // 1. Trigger the run (server route funds a fresh escrow + returns its workId).
-      const res = await fetch(`/api/demo/${type}`, { method: 'POST' });
-      const body = await res.json();
-      if (!res.ok || !body.workId) {
-        setStatus(`error: ${body.error ?? 'failed to start run'}`); stop(); return;
-      }
-      workId = body.workId;
-    } catch (e) {
-      setStatus(`error: ${e instanceof Error ? e.message : String(e)}`); stop(); return;
-    }
+    // The client owns the workId and opens the SSE FIRST. Only once the stream is connected do we
+    // POST to start the run — so the fund→route→evidence→verdict→settle steps arrive LIVE instead
+    // of a ~25s dead spinner followed by an instant history dump.
+    const workId = randomWorkId();
+    push({ key: 'fund', text: `Payer agent escrowing 1 USDC on Arc · workId ${workId.slice(0, 10)}…`, tone: 'neutral' });
 
-    push({ key: 'fund', text: `Payer agent escrowed 1 USDC on Arc · workId ${workId.slice(0, 10)}…`, tone: 'neutral' });
-
-    // 2. Stream the courtroom over the SSE proxy.
     esRef.current?.close();
-    const es = new EventSource(`/api/stream/${workId}`);
+    const es = new EventSource(`${WORKER_BASE}/api/stream/${workId}`);
     esRef.current = es;
     streamLive.current = true;
+
+    // 90s watchdog: if no terminal event lands (worker hung/unreachable), surface a clean failure
+    // instead of a forever-spinner on camera.
+    watchdogRef.current = setTimeout(() => {
+      if (streamLive.current) { setStatus('timed out — retry the run'); stop(); }
+    }, 90000);
+
+    // Start the run only after the stream is open (so no early events are missed; the bus also
+    // replays history as a safety net).
+    es.onopen = async () => {
+      try {
+        const res = await fetch(`/api/demo/${type}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workId }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setStatus(`error: ${body.error ?? 'failed to start run'}`); stop();
+        } else {
+          setStatus('running…');
+        }
+      } catch (e) {
+        setStatus(`error: ${e instanceof Error ? e.message : String(e)}`); stop();
+      }
+    };
 
     es.onmessage = (e) => {
       let ev: { type: string; data: Record<string, unknown> };
@@ -217,7 +244,7 @@ export function Courtroom() {
             <p className="p-role">Arbiter ◆</p>
             <p className="p-name">Verdikt Escrow</p>
             <p className="p-desc">Holds the fee, picks a route, gathers evidence, and rules. No human, no override.</p>
-            <p className="p-addr">Arc · <a href={`https://testnet.arcscan.app/address/${ESCROW}`} target="_blank" rel="noopener noreferrer">0xa66D…055e</a></p>
+            <p className="p-addr">Arc · <a href={`https://testnet.arcscan.app/address/${ESCROW}`} target="_blank" rel="noopener noreferrer">{`${ESCROW.slice(0, 6)}…${ESCROW.slice(-4)}`}</a></p>
           </div>
           <div className="conn" aria-hidden="true">←</div>
           <div className="party worker">

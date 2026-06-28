@@ -9,6 +9,10 @@ import type { Task, Artifact, Acceptance } from '../types.js';
 
 export const demoRouter = Router();
 
+// In-flight workIds: idempotency for the async run (a duplicate POST for a workId already
+// running is rejected 409 rather than double-funding). Cleared in the async finally block.
+const inFlight = new Set<string>();
+
 const FIXTURES = process.env.FIXTURES_DIR ?? join(process.cwd(), '..', 'fixtures');
 
 // Read the payer's schema contract — honors the payer's real min_response_bytes (not a hardcode).
@@ -64,22 +68,33 @@ demoRouter.post('/api/demo/:type', async (req, res) => {
   const reqAmount = Number(req.body.amountUsdc);
   const amountUsdc = Math.min(Number.isFinite(reqAmount) && reqAmount > 0 ? reqAmount : DEMO_MAX_USDC, DEMO_MAX_USDC);
 
+  if (inFlight.has(workId)) { res.status(409).json({ error: 'workId already in flight' }); return; }
+
   const { acceptance, artifact } = await scenario.load();
   let task = await getTask(workId);
   if (!task) {
     task = { workId, type: scenario.type, acceptance, payer, worker, amountUsdc };
     await insertTask(task);
   }
+  const t = task; // non-null capture for the async closure
 
-  // Fund the escrow on-chain FIRST (real EIP-3009 pull) so settle() sees STATUS_FUNDED.
-  try {
-    const fundTx = await fundEscrow({ payerKey: process.env.DEMO_PAYER_KEY as `0x${string}`, workId, worker: task.worker, amountUsdc: task.amountUsdc });
-    await recordFunded(workId, fundTx);
-    sseBus.publish(workId, 'task_funded', { fundTx, amountUsdc: task.amountUsdc });
-  } catch (err) {
-    res.status(500).json({ error: `funding failed: ${err instanceof Error ? err.message : String(err)}` }); return;
-  }
+  // ACK immediately (202) so the client's already-open SSE renders the run unfolding LIVE,
+  // instead of a ~25s dead spinner followed by a history dump. The fund→verdict→settle runs
+  // async and publishes every step (task_funded → route → evidence → verdict → settled) over
+  // the SSE bus. Funding errors are published as an SSE error, not a lost HTTP 500.
+  inFlight.add(workId);
+  res.status(202).json({ workId, accepted: true });
 
-  const result = await runVerdict(task, artifact);
-  res.json({ workId, verdict: result.verdict.verdict, outcome: result.outcome, txHash: result.txHash, error: result.error });
+  void (async () => {
+    try {
+      const fundTx = await fundEscrow({ payerKey: process.env.DEMO_PAYER_KEY as `0x${string}`, workId, worker: t.worker, amountUsdc: t.amountUsdc });
+      await recordFunded(workId, fundTx);
+      sseBus.publish(workId, 'task_funded', { fundTx, amountUsdc: t.amountUsdc });
+      await runVerdict(t, artifact);
+    } catch (err) {
+      sseBus.publish(workId, 'error', { stage: 'funding', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      inFlight.delete(workId);
+    }
+  })();
 });
