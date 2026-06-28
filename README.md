@@ -127,7 +127,7 @@ The worker suite runs real code through the sandbox: a SQL-injection solution is
 ## Smart Contracts
 | Contract | Address | Chain | Description |
 |----------|---------|-------|-------------|
-| `VerdiktEscrow` | `0xa66D1470f8203559Ad1299a13D8a3E5cE989055e` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
+| `VerdiktEscrow` | `0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
 
 ## On-Chain Verification
 Every settlement is a real Arc transaction that moves USDC. A few from the live triad (explorer: `testnet.arcscan.app`):

@@ -5,7 +5,7 @@ import { QualityChecks } from './QualityChecks';
 import type { EvidenceItem, VerdictLabel, Outcome } from '../../types';
 import { txUrl } from '../../lib/chains';
 
-const ESCROW = '0xa66D1470f8203559Ad1299a13D8a3E5cE989055e';
+const ESCROW = '0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5';
 
 type DemoType = 'good' | 'bad' | 'abstain' | 'schema' | 'schema-bad';
 

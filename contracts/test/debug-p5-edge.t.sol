@@ -30,7 +30,7 @@ contract NonceBindingUSDC {
         return true;
     }
 
-    function transferWithAuthorization(
+    function receiveWithAuthorization(
         address from,
         address to,
         uint256 value,
@@ -70,7 +70,7 @@ contract ReentrantUSDC {
         targetWorkId = _workId;
     }
 
-    function transferWithAuthorization(
+    function receiveWithAuthorization(
         address from,
         address to,
         uint256 value,
@@ -93,7 +93,7 @@ contract ReentrantUSDC {
         if (address(escrow) != address(0) && !attacked) {
             attacked = true;
             // Re-enter: try to settle the same workId again mid-transfer.
-            escrow.settle(targetWorkId, 0, 0, bytes32(0));
+            escrow.settle(targetWorkId, 0, bytes32(0));
         }
         require(balanceOf[msg.sender] >= amt, "insufficient");
         balanceOf[msg.sender] -= amt;
@@ -224,7 +224,7 @@ contract VerdiktEscrowEdgeTest is Test {
         // independently by calling the token directly with the consumed nonce.
         bytes32 nonceR = keccak256(abi.encode(keccak256("R"), worker, AMT, payer));
         vm.expectRevert("authorization used");
-        NonceBindingUSDC(USDC).transferWithAuthorization(
+        NonceBindingUSDC(USDC).receiveWithAuthorization(
             payer, address(esc), AMT, 0, type(uint256).max, nonceR, 27, bytes32(0), bytes32(0)
         );
     }
@@ -235,55 +235,63 @@ contract VerdiktEscrowEdgeTest is Test {
     function testSettleBeforeFundReverts() public {
         vm.prank(verdictWallet);
         vm.expectRevert("not funded");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
     function testSettleByOwnerNotVerdictReverts() public {
         _fund();
         // owner == address(this) (deployer); still not the verdict wallet.
         vm.expectRevert("not verdict");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
     function testSettleByArbitraryAddressReverts() public {
         _fund();
         vm.prank(attacker);
         vm.expectRevert("not verdict");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
     // Double-settle variant: refund first, then release attempt -> "not funded".
     function testDoubleSettleRefundThenReleaseReverts() public {
         _fund();
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 1, 1, EVIDENCE); // refund
+        escrow.settle(WORK_ID, 1, EVIDENCE); // verdictCode=fail -> refund
         vm.prank(verdictWallet);
         vm.expectRevert("not funded");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
-    // Outcome enum out of range — boundary (3) and far-out (255).
-    function testOutcomeOutOfRangeBoundaryReverts() public {
+    // M-3: outcome is DERIVED from verdictCode on-chain — the settlement wallet cannot pass an
+    // outcome that contradicts the verdict. A fail verdict can ONLY refund the payer, never release.
+    function testVerdictCodeFailDerivesRefundNotRelease() public {
         _fund();
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
         vm.prank(verdictWallet);
-        vm.expectRevert("bad outcome");
-        escrow.settle(WORK_ID, 3, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 1, EVIDENCE); // verdictCode=fail
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.outcome, 1, "fail must derive refund");
+        assertEq(MockUSDC(USDC).balanceOf(worker), 0, "worker never paid on a fail");
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + AMT, "payer refunded");
     }
 
-    function testOutcomeOutOfRangeMaxReverts() public {
+    // An unknown/out-of-spec verdictCode falls through to the payer-protective refund default.
+    function testUnknownVerdictCodeDerivesRefund() public {
         _fund();
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
         vm.prank(verdictWallet);
-        vm.expectRevert("bad outcome");
-        escrow.settle(WORK_ID, 255, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 200, EVIDENCE); // unknown code -> refund
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.outcome, 1, "unknown code must derive refund");
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + AMT, "payer refunded on unknown code");
     }
 
     // verdictCode is anchored as-is (no on-chain enum range check); document the behavior:
-    // an out-of-spec verdictCode does NOT revert — it is stored verbatim. This is intentional
-    // (the code is an off-chain-meaningful tag), but worth pinning so a future change is noticed.
+    // an out-of-spec verdictCode does NOT revert — it is stored verbatim, and derives a refund.
     function testVerdictCodeNotRangeChecked() public {
         _fund();
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 0, 99, EVIDENCE); // verdictCode=99, no revert by design
+        escrow.settle(WORK_ID, 99, EVIDENCE); // verdictCode=99, no revert by design
         VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
         assertEq(e.verdictCode, 99);
     }
@@ -309,10 +317,10 @@ contract VerdiktEscrowEdgeTest is Test {
         // Old verdict wallet can no longer settle.
         vm.prank(verdictWallet);
         vm.expectRevert("not verdict");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
         // New verdict wallet can.
         vm.prank(newVerdict);
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
         assertEq(MockUSDC(USDC).balanceOf(worker), AMT);
     }
 
@@ -334,7 +342,7 @@ contract VerdiktEscrowEdgeTest is Test {
         vm.expectEmit(true, false, false, true);
         emit Settled(WORK_ID, 0, worker, AMT, 0, EVIDENCE);
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
     // ---------------------------------------------------------------
@@ -368,7 +376,7 @@ contract VerdiktEscrowEdgeTest is Test {
         // The revert bubbles through token.transfer back into the outer settle, reverting it.
         vm.prank(address(token));
         vm.expectRevert("not funded");
-        esc.settle(WORK_ID, 0, 0, EVIDENCE);
+        esc.settle(WORK_ID, 0, EVIDENCE);
 
         // Escrow untouched: no payout, status still FUNDED (both calls reverted).
         VerdiktEscrow.Escrow memory e = esc.getEscrow(WORK_ID);

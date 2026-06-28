@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-// Minimal USDC mock for unit tests. transferWithAuthorization ignores the
+// Minimal USDC mock for unit tests. receiveWithAuthorization ignores the
 // signature (signature verification is the real token's job) and just moves
 // balance from -> to, mirroring the real token's post-verification effect.
 contract MockUSDC {
@@ -18,7 +18,7 @@ contract MockUSDC {
         return true;
     }
 
-    function transferWithAuthorization(
+    function receiveWithAuthorization(
         address from,
         address to,
         uint256 value,
