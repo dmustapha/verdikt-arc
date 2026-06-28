@@ -37,7 +37,11 @@ config.json
 intel-state.json
 pipeline-log.md
 *-REPORT.md
+*-PLAN.md
+*-CRITIQUE.md
 STRESS-TEST-PLAN.md
+DEEP-TEST-PLAN.md
+PRE-SUBMISSION-CRITIQUE.md
 .pipeline-progress.log
 .watchdog-last-alert
 .codebase-manifest.md
