@@ -18,3 +18,16 @@ export async function readOnchainEscrow(workId: `0x${string}`) {
     abi: VERDIKT_ESCROW_ABI, functionName: 'getEscrow', args: [workId],
   });
 }
+
+// The "why Arc" proof: gas for a settle tx is paid in USDC (Arc's native asset, 18 decimals), so an
+// agent holds ONE asset for earn/fund/fee/settle/gas. We read the real receipt and compute the gas
+// cost in USDC (gasUsed × effectiveGasPrice). Returns null on any RPC hiccup so /proof never breaks.
+export async function getTxGasUsdc(txHash: `0x${string}`): Promise<{ gasUsed: string; gasUsdc: string } | null> {
+  try {
+    const r = await client.getTransactionReceipt({ hash: txHash });
+    const wei = r.gasUsed * r.effectiveGasPrice; // both bigint
+    return { gasUsed: r.gasUsed.toString(), gasUsdc: (Number(wei) / 1e18).toFixed(6) };
+  } catch {
+    return null;
+  }
+}
