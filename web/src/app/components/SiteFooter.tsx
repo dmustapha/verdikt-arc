@@ -1,4 +1,4 @@
-const ESCROW_URL = 'https://testnet.arcscan.app/address/0xa66D1470f8203559Ad1299a13D8a3E5cE989055e';
+const ESCROW_URL = 'https://testnet.arcscan.app/address/0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5';
 
 // Shared footer: wordmark, mission line, and the on-chain meta row.
 export function SiteFooter() {

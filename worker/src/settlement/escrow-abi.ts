@@ -20,7 +20,6 @@ export const VERDIKT_ESCROW_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'workId', type: 'bytes32' },
-      { name: 'outcome', type: 'uint8' },
       { name: 'verdictCode', type: 'uint8' },
       { name: 'evidenceHash', type: 'bytes32' },
     ],
@@ -70,5 +69,6 @@ export const VERDIKT_ESCROW_ABI = [
   },
 ] as const;
 
-// The `settle` signature string Circle DCW contractExecution expects.
-export const SETTLE_FN_SIGNATURE = 'settle(bytes32,uint8,uint8,bytes32)';
+// The `settle` signature string Circle DCW contractExecution expects. The outcome is derived
+// on-chain from verdictCode (M-3), so it is no longer a parameter.
+export const SETTLE_FN_SIGNATURE = 'settle(bytes32,uint8,bytes32)';

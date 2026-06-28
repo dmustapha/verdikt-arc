@@ -53,7 +53,7 @@ contract VerdiktEscrowTest is Test {
     function testSettleReleaseToWorker() public {
         _fund();
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE); // release, pass
+        escrow.settle(WORK_ID, 0, EVIDENCE); // verdictCode=pass -> release
         assertEq(MockUSDC(USDC).balanceOf(worker), AMT);
         VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
         assertEq(e.status, 2); // SETTLED
@@ -66,7 +66,7 @@ contract VerdiktEscrowTest is Test {
         _fund();
         uint256 before = MockUSDC(USDC).balanceOf(payer);
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 1, 1, EVIDENCE); // refund, fail
+        escrow.settle(WORK_ID, 1, EVIDENCE); // verdictCode=fail -> refund
         assertEq(MockUSDC(USDC).balanceOf(payer), before + AMT);
     }
 
@@ -74,7 +74,7 @@ contract VerdiktEscrowTest is Test {
         _fund();
         uint256 before = MockUSDC(USDC).balanceOf(payer);
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 2, 3, EVIDENCE); // abstain-default, abstain
+        escrow.settle(WORK_ID, 3, EVIDENCE); // verdictCode=abstain -> abstain-default (payer)
         assertEq(MockUSDC(USDC).balanceOf(payer), before + AMT);
     }
 
@@ -82,22 +82,53 @@ contract VerdiktEscrowTest is Test {
         _fund();
         vm.prank(payer);
         vm.expectRevert("not verdict");
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
     }
 
     function testCannotDoubleSettle() public {
         _fund();
         vm.prank(verdictWallet);
-        escrow.settle(WORK_ID, 0, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
         vm.prank(verdictWallet);
         vm.expectRevert("not funded");
-        escrow.settle(WORK_ID, 1, 1, EVIDENCE);
+        escrow.settle(WORK_ID, 1, EVIDENCE);
     }
 
-    function testBadOutcomeReverts() public {
+    // M-3: totalEscrowed accounting tracks funded principal and zeroes on settle.
+    function testTotalEscrowedAccounting() public {
+        assertEq(escrow.totalEscrowed(), 0);
         _fund();
+        assertEq(escrow.totalEscrowed(), AMT, "funded principal tracked");
         vm.prank(verdictWallet);
-        vm.expectRevert("bad outcome");
-        escrow.settle(WORK_ID, 3, 0, EVIDENCE);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
+        assertEq(escrow.totalEscrowed(), 0, "settle releases the accounting");
+    }
+
+    // H-1: sweep() recovers stray USDC (e.g. a stranded direct transfer) but can NEVER touch
+    // funded principal — only the balance above totalEscrowed.
+    function testSweepRecoversStrandedButNotFunded() public {
+        _fund(); // AMT locked in escrow, totalEscrowed == AMT
+        MockUSDC(USDC).mint(address(escrow), 7_000000); // 7 USDC stranded (no escrow record)
+        uint256 ownerAddr = MockUSDC(USDC).balanceOf(address(this));
+        escrow.sweep(address(this)); // owner == this (deployer)
+        assertEq(MockUSDC(USDC).balanceOf(address(this)), ownerAddr + 7_000000, "only stray swept");
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), AMT, "funded principal untouched");
+        // The funded escrow still settles in full afterwards.
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
+        assertEq(MockUSDC(USDC).balanceOf(worker), AMT, "worker still paid full principal");
+    }
+
+    function testSweepNothingToSweepReverts() public {
+        _fund(); // balance == totalEscrowed, nothing free
+        vm.expectRevert("nothing to sweep");
+        escrow.sweep(address(this));
+    }
+
+    function testSweepOnlyOwner() public {
+        MockUSDC(USDC).mint(address(escrow), 1_000000);
+        vm.prank(address(0xBAD));
+        vm.expectRevert("not owner");
+        escrow.sweep(address(0xBAD));
     }
 }

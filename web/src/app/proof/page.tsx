@@ -12,7 +12,7 @@ const verdictClass = (v: string) => (v === 'pass' ? 'v-release' : v === 'abstain
 
 export default async function ProofPage() {
   const [rows, externalCalls] = await Promise.all([getLedger(20), getExternalCallCount()]);
-  const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0xa66D1470f8203559Ad1299a13D8a3E5cE989055e';
+  const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5';
   const gatewaySpend = (externalCalls * FEE_USDC).toFixed(3);
 
   return (

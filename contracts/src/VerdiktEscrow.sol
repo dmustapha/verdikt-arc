@@ -32,6 +32,10 @@ contract VerdiktEscrow {
 
     mapping(bytes32 => Escrow) private escrows;
 
+    // Sum of USDC currently backing FUNDED escrows. Lets sweep() recover stray balance without
+    // ever touching escrowed principal (free = balanceOf(this) - totalEscrowed).
+    uint256 public totalEscrowed;
+
     address public owner;
     address public verdict; // settlement orchestrator wallet (Circle DCW)
 
@@ -76,6 +80,9 @@ contract VerdiktEscrow {
     ///         mempool observer who copies the payer's signed blob but changes workId
     ///         or worker computes a different nonce, so the signature no longer recovers
     ///         and the token reverts — the authorization is bound to this exact task.
+    ///         We use receiveWithAuthorization (msg.sender == to enforced by the token), so the
+    ///         ONLY way to redeem the payer's signature is through this function, which records the
+    ///         escrow atomically. That closes the H-1 stranded-funds front-run.
     function fundWithAuthorization(
         bytes32 workId,
         address worker,
@@ -90,10 +97,11 @@ contract VerdiktEscrow {
 
         bytes32 nonce = keccak256(abi.encode(workId, worker, amount, msg.sender));
         (uint8 v, bytes32 r, bytes32 s) = _split(sig);
-        IERC3009(USDC).transferWithAuthorization(
+        IERC3009(USDC).receiveWithAuthorization(
             msg.sender, address(this), amount, validAfter, validBefore, nonce, v, r, s
         );
 
+        totalEscrowed += amount;
         escrows[workId] = Escrow({
             payer: msg.sender,
             worker: worker,
@@ -106,27 +114,43 @@ contract VerdiktEscrow {
         emit Funded(workId, msg.sender, worker, amount);
     }
 
-    /// @notice Settle a funded escrow on an authorized verdict.
-    /// @param outcome 0=release(worker) 1=refund(payer) 2=abstain-default(payer)
+    /// @notice Settle a funded escrow on an authorized verdict. The on-chain outcome is DERIVED
+    ///         from verdictCode here — the settlement wallet cannot pass an outcome that
+    ///         contradicts the recorded verdict (M-3). pass->release, abstain->abstain-default,
+    ///         everything else (fail/partial/unknown)->refund (payer-protective default).
     /// @param verdictCode 0=pass 1=fail 2=partial 3=abstain
     /// @param evidenceHash keccak256 of the canonical evidence bundle
-    function settle(bytes32 workId, uint8 outcome, uint8 verdictCode, bytes32 evidenceHash)
+    function settle(bytes32 workId, uint8 verdictCode, bytes32 evidenceHash)
         external
         onlyVerdict
     {
-        require(outcome <= OUTCOME_ABSTAIN, "bad outcome");
         Escrow storage e = escrows[workId];
         require(e.status == STATUS_FUNDED, "not funded"); // status guard: no double-settle
+
+        uint8 outcome = verdictCode == 0
+            ? OUTCOME_RELEASE
+            : (verdictCode == 3 ? OUTCOME_ABSTAIN : OUTCOME_REFUND);
 
         e.status = STATUS_SETTLED;
         e.outcome = outcome;
         e.verdictCode = verdictCode;
         e.evidenceHash = evidenceHash;
+        totalEscrowed -= e.amount;
 
         address to = outcome == OUTCOME_RELEASE ? e.worker : e.payer;
         require(IERC20(USDC).transfer(to, e.amount), "transfer failed");
 
         emit Settled(workId, outcome, to, e.amount, verdictCode, evidenceHash);
+    }
+
+    /// @notice Recover USDC sitting in the contract that is NOT backing a funded escrow (e.g. a
+    ///         stranded direct transfer). Can NEVER touch escrowed principal — it only moves the
+    ///         balance above totalEscrowed.
+    function sweep(address to) external onlyOwner {
+        require(to != address(0), "to=0");
+        uint256 free = IERC20(USDC).balanceOf(address(this)) - totalEscrowed; // >= 0 by construction
+        require(free > 0, "nothing to sweep");
+        require(IERC20(USDC).transfer(to, free), "transfer failed");
     }
 
     function getEscrow(bytes32 workId) external view returns (Escrow memory) {

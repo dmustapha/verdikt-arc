@@ -11,8 +11,11 @@ const USDC_DOMAIN = {
   verifyingContract: ARC_USDC_ADDRESS,
 } as const;
 
-const TRANSFER_TYPES = {
-  TransferWithAuthorization: [
+// H-1: sign a ReceiveWithAuthorization (not TransferWithAuthorization). The 6 fields are identical;
+// only the EIP-712 primaryType/typehash differs. receiveWithAuthorization forces msg.sender == to at
+// the token, so the escrow is the only account that can redeem this signature — front-run closed.
+const RECEIVE_TYPES = {
+  ReceiveWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },
     { name: 'value', type: 'uint256' },
@@ -52,8 +55,8 @@ export async function fundEscrow(params: {
   const signature = await wallet.signTypedData({
     account,
     domain: USDC_DOMAIN,
-    types: TRANSFER_TYPES,
-    primaryType: 'TransferWithAuthorization',
+    types: RECEIVE_TYPES,
+    primaryType: 'ReceiveWithAuthorization',
     message: { from: account.address, to: escrow, value, validAfter, validBefore, nonce },
   });
 
