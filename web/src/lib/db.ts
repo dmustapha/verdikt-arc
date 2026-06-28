@@ -32,3 +32,11 @@ export async function getExternalCallCount(): Promise<number> {
   const r = await sql`SELECT COUNT(*)::int AS cnt FROM vk_external_calls`;
   return r.rows[0]?.cnt ?? 0;
 }
+
+// Honest Gateway counter (C13 fix): the SUM of REAL settled x402 fees, not count × an assumed
+// price. Each row is one metered /api/verdict call; demo runs are unmetered and insert no rows, so
+// every row here is a genuine third-party paid call.
+export async function getExternalFeeSum(): Promise<{ count: number; sumUsdc: number }> {
+  const r = await sql`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(fee_usdc), 0)::float8 AS total FROM vk_external_calls`;
+  return { count: r.rows[0]?.cnt ?? 0, sumUsdc: r.rows[0]?.total ?? 0 };
+}
