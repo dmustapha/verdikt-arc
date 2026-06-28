@@ -154,15 +154,17 @@ This exact path was exercised end to end against the live worker: deposit → 40
 | `VerdiktEscrow` | `0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
 
 ## On-Chain Verification
-Every settlement is a real Arc transaction that moves USDC. A few from the live triad (explorer: `testnet.arcscan.app`):
+Every settlement is a real Arc transaction that moves USDC. The full set from the live deep-test run on the deployed contract (explorer: `testnet.arcscan.app`), each confirmed `status=0x1`:
 
-| Outcome | Transaction |
-|---------|-------------|
-| Bad code to refund | `0xf89bb5c801ca714208d62217e575d1fbeacb94036c3a75055bc272c7696ebb02` |
-| Good code to release | `0xd1d4d74d0f0af5d9...` (worker balance increases by the escrow amount) |
-| Unsupported to abstain | `0x2abbcbf1289dbe6f03c62fd15026cb33a5919bec4b1ca53b02d58575d7786cf3` |
+| Flow | Verdict | Outcome | Transaction |
+|------|---------|---------|-------------|
+| Good code | pass | release (worker +1 USDC) | `0x8bd0009eb7ffd18f01c229b6239a92b8d5115df11aa0cd7662f169fab9d07af1` |
+| Bad code (SQLi) | fail | refund (payer) | `0x70ce59344859983bc67fd6d47c79fde6a594df1032d27cd6af40760dcc6b6a8c` |
+| Unsupported answer | abstain | refund-default (payer) | `0x9b22e6af50d5f52fc0962eaeedb58e13c968560af900162a7502cdea5f974bf5` |
+| Schema valid | pass | release (worker) | `0x12d04b1ff6d7995565653c6b13aef92cfc0f1c5a0b13a797f9ed9375ff0b93fd` |
+| Schema invalid | fail | refund (payer) | `0x1dc1cd93f29a2a22b6f55a73931f30a65021adc09d555d44cc5124ad62e25d4b` |
 
-The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable.
+Contract deployed at `0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5` (deploy tx `0x812f91035ccacb846e650c1d3d7e42180b91a12835e12d434fc1417ceacf534d`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
 
 ---
 
