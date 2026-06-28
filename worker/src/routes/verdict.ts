@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { recoverMessageAddress, keccak256, toBytes } from 'viem';
-import { requireVerdictFee } from '../lib/x402-meter.js';
+import { requireVerdictFee, captureVerdictFee } from '../lib/x402-meter.js';
 import { getTask, recordExternalCall, claimForJudging } from '../lib/db.js';
 import { runVerdict } from '../engine/orchestrator.js';
 import type { Artifact } from '../types.js';
@@ -42,7 +42,19 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
   const claimed = await claimForJudging(workId);
   if (!claimed) { res.status(409).json({ error: 'escrow not in funded state (already judged or not funded)' }); return; }
 
-  await recordExternalCall(workId, (res.locals.feeUsdc as number) ?? 0);
   const result = await runVerdict(task, artifact);
-  res.json({ workId, verdict: result.verdict.verdict, outcome: result.outcome, txHash: result.txHash, error: result.error });
+
+  // Auth-and-capture: charge the seller's authorized x402 fee ONLY when we actually rendered a
+  // verdict (release/refund) AND it settled on-chain. On `abstain` (we could not verify) or a failed
+  // settlement, we DO NOT capture — "if we couldn't verify, we don't take their money." The escrow
+  // principal is unaffected (it always refunds the payer on abstain).
+  let feeUsdc = 0;
+  const rendered = !!result.txHash && (result.outcome === 'release' || result.outcome === 'refund');
+  if (rendered) {
+    const cap = await captureVerdictFee(res);
+    feeUsdc = cap.feeUsdc;
+    if (feeUsdc > 0) await recordExternalCall(workId, feeUsdc);
+  }
+
+  res.json({ workId, verdict: result.verdict.verdict, outcome: result.outcome, txHash: result.txHash, feeUsdc, error: result.error });
 });

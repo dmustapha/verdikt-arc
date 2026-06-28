@@ -59,7 +59,12 @@ export async function runCodeRoute(acceptance: Acceptance, artifact: Artifact): 
     let stdout: string;
     try {
       stdout = await runDocker(
+        // Defense-in-depth on top of the no-net + memory/pid/cpu caps: drop ALL Linux capabilities
+        // (the runner needs none — it runs python as a non-root user) and block privilege escalation
+        // (setuid). The /work mount stays read-only; tool output is written under the container's
+        // /tmp, so these flags don't constrain the runner.
         ['run', '--rm', '--network=none', '--memory=512m', '--cpus=1', '--pids-limit=128',
+         '--cap-drop=ALL', '--security-opt=no-new-privileges',
          '-v', `${dir}:/work:ro`, RUNNER_IMAGE],
         35_000, 8 * 1024 * 1024,
       );

@@ -22,7 +22,15 @@ function build402(req: Request, res: Response) {
   res.status(402).json({ error: 'Payment required', fee_usdc: VERDICT_FEE_USDC, currency: 'USDC', chain: 'arcTestnet' });
 }
 
-async function settleViaGateway(header: string): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+interface PaymentAuthorization {
+  payload: { accepted?: unknown };
+  requirements: unknown;
+}
+
+// AUTHORIZE only — confirm the payment is valid via the facilitator's /verify, but DO NOT move funds
+// yet. This is the Stripe-style "auth" half of auth-and-capture: we prove the caller can pay (so we
+// never run an expensive verdict for a non-payer) without charging them before we know the outcome.
+async function verifyViaGateway(header: string): Promise<{ ok: boolean; auth?: PaymentAuthorization; error?: string }> {
   let payload: { accepted?: unknown };
   try {
     payload = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
@@ -39,10 +47,15 @@ async function settleViaGateway(header: string): Promise<{ ok: boolean; txHash?:
   if (!verify.ok) return { ok: false, error: `verify ${verify.status}` };
   const vr = (await verify.json()) as { isValid?: boolean; invalidReason?: string };
   if (!vr.isValid) return { ok: false, error: vr.invalidReason ?? 'invalid' };
+  return { ok: true, auth: { payload, requirements } };
+}
 
+// CAPTURE — actually settle the fee via the facilitator's /settle. Called ONLY after a verdict was
+// rendered (release/refund). The "capture" half of auth-and-capture.
+async function captureViaGateway(auth: PaymentAuthorization): Promise<{ ok: boolean; txHash?: string; error?: string }> {
   const settle = await fetch(`${FACILITATOR_URL}/v1/x402/settle`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paymentPayload: payload, paymentRequirements: requirements }),
+    body: JSON.stringify({ paymentPayload: auth.payload, paymentRequirements: auth.requirements }),
   });
   if (!settle.ok) return { ok: false, error: `settle ${settle.status}` };
   const sr = (await settle.json()) as { success?: boolean; transaction?: string; errorReason?: string };
@@ -50,17 +63,32 @@ async function settleViaGateway(header: string): Promise<{ ok: boolean; txHash?:
   return { ok: true, txHash: sr.transaction };
 }
 
-// Express middleware: 402 unless a valid Payment-Signature is present. ENFORCE_X402=false
-// skips metering for internal/demo runs (the /api/demo route is never metered).
+// Middleware: AUTHORIZE the fee (verify, don't charge). ENFORCE_X402=false skips metering entirely
+// (internal/demo runs are never metered). On success, the verified authorization is stashed on
+// res.locals for the route to CAPTURE later — but only if it renders a verdict.
 export async function requireVerdictFee(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (process.env.ENFORCE_X402 === 'false') { res.locals.feeUsdc = 0; return next(); }
+  if (process.env.ENFORCE_X402 === 'false') { res.locals.payment = null; return next(); }
   const header = req.header('Payment-Signature') ?? req.header('X-Payment');
   if (!header) return build402(req, res);
-  const result = await settleViaGateway(header);
-  if (!result.ok) { res.status(402).json({ error: `x402 fee not settled: ${result.error}` }); return; }
-  res.locals.feeUsdc = VERDICT_FEE_USDC;
-  res.locals.feeTxHash = result.txHash ?? null;
+  const result = await verifyViaGateway(header);
+  if (!result.ok) { res.status(402).json({ error: `x402 fee not authorized: ${result.error}` }); return; }
+  res.locals.payment = result.auth; // authorized, not yet captured
   next();
+}
+
+// Capture the authorized fee. The route calls this ONLY when a verdict was rendered (release/refund)
+// and settled on-chain — never on abstain. "If we couldn't verify, we don't take their money."
+// Returns the fee actually charged (0 when there was no authorization, e.g. ENFORCE_X402=false).
+export async function captureVerdictFee(res: Response): Promise<{ feeUsdc: number; txHash: string | null }> {
+  const auth = res.locals.payment as PaymentAuthorization | null;
+  if (!auth) return { feeUsdc: 0, txHash: null };
+  const cap = await captureViaGateway(auth);
+  if (!cap.ok) {
+    // Never fabricate a charge; if capture fails, the caller is not billed.
+    console.error(`[x402] fee capture failed: ${cap.error}`);
+    return { feeUsdc: 0, txHash: null };
+  }
+  return { feeUsdc: VERDICT_FEE_USDC, txHash: cap.txHash ?? null };
 }
 
 export { VERDICT_FEE_USDC };
