@@ -70,17 +70,16 @@ describe('schema route — deterministic validation', () => {
 });
 
 describe('schema route → floor (anti false-certify on bad schema output)', () => {
-  // Bad schema items have status:fail but kind:'schema_check', NOT 'test'/'static'.
-  // The floor only short-circuits on test-fail / static. Document the real gate: a bad schema
-  // bundle is decided by the LLM reasoner. With Claude DOWN it must abstain → refund, never pass.
-  it('bad schema bundle + API down → abstain (refund), never pass', async () => {
+  // H-A: the deterministic floor now covers EVERY route — any item with status 'fail' (including
+  // a failed schema_check) disqualifies WITHOUT the LLM. A bad schema bundle deterministically
+  // fails → refund, regardless of whether Claude is reachable. (Was previously LLM-decided.)
+  it('bad schema bundle → deterministic fail (refund), even with API down, never pass', async () => {
     const b = runSchemaRoute(acceptance, art(badOut));
     const prevKey = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = '';
     try {
       const r = await reasonOverEvidence(b);
-      expect(r.verdict).not.toBe('pass');
-      expect(['abstain', 'fail']).toContain(r.verdict);
+      expect(r.verdict).toBe('fail'); // deterministic floor — schema_match + value_bounds fail
     } finally {
       process.env.ANTHROPIC_API_KEY = prevKey;
     }

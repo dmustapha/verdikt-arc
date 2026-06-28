@@ -68,11 +68,25 @@ export async function runCodeRoute(acceptance: Acceptance, artifact: Artifact): 
       return { route: 'code', items: [], routeError: `sandbox error: ${msg.slice(0, 200)}` };
     }
 
-    let parsed: { semgrep: { results?: SemgrepResult[] } | null; bandit: { results?: BanditResult[] } | null; pytest: { tests?: PytestTest[] } | null };
+    let parsed: {
+      semgrep: { status?: string; results?: SemgrepResult[] } | null;
+      bandit: { status?: string; results?: BanditResult[] } | null;
+      pytest: { tests?: PytestTest[] } | null;
+    };
     try {
       parsed = JSON.parse(stdout.trim());
     } catch {
       return { route: 'code', items: [], routeError: 'sandbox produced unparseable output' };
+    }
+
+    // H-B fail-CLOSED: a static scanner that did not run cleanly yields NO static evidence — we must
+    // not release on its silence. Mirror the pytest-null contract → routeError → reasoner abstains
+    // (refund-to-payer), never a false certify. Only status "ok" carries trustworthy findings.
+    if (parsed.semgrep?.status !== 'ok') {
+      return { route: 'code', items: [], routeError: 'static scan unavailable (semgrep did not run cleanly)' };
+    }
+    if (parsed.bandit?.status !== 'ok') {
+      return { route: 'code', items: [], routeError: 'static scan unavailable (bandit did not run cleanly)' };
     }
 
     const items: EvidenceItem[] = [];

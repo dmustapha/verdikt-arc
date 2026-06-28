@@ -24,19 +24,21 @@ const VERDICT_TOOL = {
 const SYSTEM =
   'You are an evidence arbiter that decides whether to release escrowed money for delivered work. ' +
   'Reason ONLY over the provided EvidenceBundle — never the raw artifact, never outside knowledge. ' +
-  'Rules: (1) NEVER pass if any item with kind "test" has status "fail". ' +
-  '(2) NEVER pass if any item with kind "static" exists (security findings are disqualifying). ' +
-  '(3) NEVER pass if the bundle has a routeError. ' +
-  '(4) Abstain when evidence is missing, contradictory, or insufficient to be confident. ' +
-  '(5) Conservative-on-pass: when unsure between pass and anything else, do not pass. ' +
+  'Rules: (1) NEVER pass if any evidence item has status "fail" — a failed test, a static ' +
+  'security finding, a failed schema check, or an unsupported claim span is each disqualifying. ' +
+  '(2) NEVER pass if the bundle has a routeError. ' +
+  '(3) Abstain when evidence is missing, contradictory, or insufficient to be confident. ' +
+  '(4) Conservative-on-pass: when unsure between pass and anything else, do not pass. ' +
   'Cite the exact evidence ids you used.';
 
 function deterministicFloor(bundle: EvidenceBundle): VerdictLabel | null {
   // Hard rules the model cannot override — computed from the bundle, not asked of the LLM.
-  if (bundle.routeError) return 'abstain';
+  if (bundle.routeError) return 'abstain';            // MUST stay first: grounding 'info' rides here
   if (bundle.items.length === 0) return 'abstain';
-  if (bundle.items.some((i) => i.kind === 'static')) return 'fail';
-  if (bundle.items.some((i) => i.kind === 'test' && i.status === 'fail')) return 'fail';
+  // Any failing item disqualifies across EVERY route — test, static, schema_check, or span.
+  // routeError is checked first, so grounding's uncertain/unmatched path (status 'info' + routeError)
+  // abstains rather than fails; only a hard status==='fail' lands here.
+  if (bundle.items.some((i) => i.status === 'fail')) return 'fail';
   return null;
 }
 
@@ -56,6 +58,15 @@ export async function reasonOverEvidence(bundle: EvidenceBundle): Promise<Verdic
     return base('abstain', bundle.items.map((i) => i.id), reason, 0.2, reason);
   }
 
+  // Deterministic-first: a disqualifying bundle (a failed test, a static security finding, a failed
+  // schema check, or an unsupported claim span) FAILS without ever calling the LLM. The refund
+  // settles in seconds and never depends on the model or API availability. The model is consulted
+  // ONLY to certify a pass over a silent floor — it can never overturn a deterministic fail.
+  if (floor === 'fail') {
+    const cited = bundle.items.filter((i) => i.status === 'fail').map((i) => i.id);
+    return base('fail', cited, 'deterministic floor: disqualifying evidence present', 0.95);
+  }
+
   // Route through global fetch: the SDK's bundled HTTP layer "Premature close"-es on tool_use
   // responses inside the Fly VM, while global undici fetch works. Verified on the deployed host.
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
@@ -71,36 +82,22 @@ export async function reasonOverEvidence(bundle: EvidenceBundle): Promise<Verdic
     });
     const block = res.content.find((b) => b.type === 'tool_use');
     if (!block || block.type !== 'tool_use') {
-      // DEV-005: no structured output → fall back to the deterministic floor so a disqualifying
-      // bundle still fails (never silently abstains away a known fail); else abstain.
-      if (floor === 'fail') {
-        const cited = bundle.items.filter((i) => i.kind === 'static' || (i.kind === 'test' && i.status === 'fail')).map((i) => i.id);
-        return base('fail', cited, 'deterministic floor: disqualifying evidence present (no structured output)', 0.9);
-      }
+      // Floor is silent here (a fail already returned above). No structured output means we cannot
+      // certify a pass → abstain. Never fabricate a pass on a clean-but-unverified bundle.
       return base('abstain', [], 'reasoner returned no structured verdict', 0.1, 'no structured output');
     }
     parsed = block.input as typeof parsed;
   } catch (err) {
-    // API error never fabricates a PASS. DEV-005: if the deterministic floor already says fail
-    // (a static finding or failed payer test), honor that fail even with Claude down — the hero
-    // refund must not depend on API availability. Only when the floor is silent do we abstain.
-    if (floor === 'fail') {
-      const cited = bundle.items.filter((i) => i.kind === 'static' || (i.kind === 'test' && i.status === 'fail')).map((i) => i.id);
-      return base('fail', cited, 'deterministic floor: disqualifying evidence present (reasoner API unavailable)', 0.9);
-    }
+    // Floor is silent here (a fail already returned above). With Claude unavailable we cannot
+    // certify a pass over silent evidence → abstain (refund-to-payer), never fabricate a pass.
     return base('abstain', [], `reasoner API error`, 0.1, err instanceof Error ? err.message : String(err));
   }
 
-  // Guard 1: every cited id must exist in the bundle, else force abstain.
+  // Guard: every cited id must exist in the bundle, else force abstain (anti-hallucination).
   const validIds = new Set(bundle.items.map((i) => i.id));
   const fabricated = parsed.cited_evidence.filter((id) => !validIds.has(id));
   if (fabricated.length > 0) {
     return base('abstain', [], `fabricated citation(s): ${fabricated.join(', ')}`, 0.1, 'fabricated citation');
-  }
-
-  // Guard 2: deterministic floor overrides an over-optimistic model (fail beats pass).
-  if (floor === 'fail' && parsed.verdict === 'pass') {
-    return base('fail', parsed.cited_evidence, 'deterministic floor: disqualifying evidence present', Math.max(parsed.confidence, 0.9));
   }
 
   return base(parsed.verdict, parsed.cited_evidence, parsed.rationale, parsed.confidence, parsed.abstain_reason);

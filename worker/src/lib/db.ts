@@ -52,6 +52,15 @@ export async function recordFunded(workId: string, fundTxHash: string): Promise<
     ON CONFLICT (work_id) DO UPDATE SET status = 'funded', fund_tx_hash = ${fundTxHash}`;
 }
 
+// H-2 single-shot lock: atomically move an escrow from 'funded' to 'judging'. Returns true ONLY
+// for the one caller that wins the transition; a replay or race against an already-judged/settled
+// workId updates 0 rows → false → 409 upstream. Stops an attacker from re-judging a funded escrow
+// with a crafted artifact during the compute window.
+export async function claimForJudging(workId: string): Promise<boolean> {
+  const r = await sql`UPDATE vk_escrows SET status = 'judging' WHERE work_id = ${workId} AND status = 'funded'`;
+  return r.rowCount === 1;
+}
+
 export async function recordEvidence(workId: string, bundle: EvidenceBundle): Promise<void> {
   await sql`
     INSERT INTO vk_evidence (work_id, bundle) VALUES (${workId}, ${JSON.stringify(bundle)})
