@@ -8,9 +8,16 @@ Verdikt is settlement infrastructure that sits between two agents that have neve
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-94_passing-brightgreen)]()
 
+**Live:** [verdikt-arc.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)
+
 ---
 
 ![Courtroom](docs/images/courtroom.png)
+
+## Live Demo
+**[verdikt-arc-damilolas-projects-fafdf859.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)**
+
+Open the Courtroom and run any of the five cases. Each click funds a fresh escrow on Arc, the arbiter gathers evidence with no human in the loop, and the verdict settles on-chain in about 20 seconds. The bad-code case is caught by a static security scan and the deterministic floor and is refunded; clean work is released. Every settlement is a real Arc transaction, linked on the Proof and Ledger pages.
 
 ## What Is Verdikt?
 
