@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { verdictRouter } from './routes/verdict.js';
 import { streamRouter } from './routes/stream.js';
 import { demoRouter } from './routes/demo.js';
+import { tasksRouter } from './routes/tasks.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -18,6 +19,7 @@ app.get('/health', (_req, res) => res.json({ ok: true, service: 'verdikt-worker'
 app.use(verdictRouter);
 app.use(streamRouter);
 app.use(demoRouter);
+app.use(tasksRouter);
 
 // JSON error handler. Replaces Express's default HTML error page (which leaks
 // absolute file paths and a stack trace in the body). Malformed JSON bodies from
