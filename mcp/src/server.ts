@@ -58,8 +58,19 @@ server.registerTool('verdikt_submit_artifact', {
   try {
     const offer = JSON.parse(a.offer) as SignedTaskOffer;
     const artifact: Artifact = { type: a.artifactType, payload: a.payload, language: a.language };
-    const result = await client().seller.submit({ offer, artifact });
-    return ok(result);
+    // Collect the live verdict steps so they are visible in-code via the tool result (the same SSE
+    // the courtroom watches). The agent sees HOW the verdict was reached, not just the outcome.
+    const steps: { step: string; detail?: string }[] = [];
+    const result = await client().seller.submit({
+      offer, artifact,
+      onStep: (s) => {
+        if (s.type === 'route_selected') steps.push({ step: 'route', detail: String(s.data.route) });
+        else if (s.type === 'evidence_item') steps.push({ step: 'evidence', detail: `${s.data.label} → ${String(s.data.status).toUpperCase()}` });
+        else if (s.type === 'verdict') steps.push({ step: 'verdict', detail: String(s.data.verdict).toUpperCase() });
+        else if (s.type === 'settled') steps.push({ step: 'settled', detail: String(s.data.outcome) });
+      },
+    });
+    return ok({ ...result, steps });
   } catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
 });
 

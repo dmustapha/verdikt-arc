@@ -59,6 +59,15 @@ export interface VerdictResult {
   evidenceHash?: `0x${string}`;
 }
 
+// A live step from the verdict engine (route_selected / evidence_item / verdict / settling / settled
+// / error). Surfaced via seller.submit({ onStep }) so an agent can narrate the verdict as it happens.
+export interface VerdictStep {
+  type: string;
+  workId?: `0x${string}`;
+  data: Record<string, unknown>;
+  ts?: number;
+}
+
 export interface VerdiktConfig {
   endpoint: string;                  // verdikt-worker base URL
   chain?: 'arc-testnet';             // chainId 5042002 (only supported chain today)
