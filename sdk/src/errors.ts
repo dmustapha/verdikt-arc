@@ -34,3 +34,10 @@ export class AlreadyJudgedError extends VerdiktError {
 export class PaymentError extends VerdiktError {
   constructor(detail: string) { super(`verdict fee not paid: ${detail}`); this.name = 'PaymentError'; }
 }
+
+// The seller could not be onboarded onto Circle Gateway — typically the wallet holds too little USDC
+// to deposit. Carries the actionable next step (fund the wallet, then deposit). Distinct from
+// PaymentError (a failed pay at submit time); this is the one-time funding setup failing.
+export class OnboardingError extends VerdiktError {
+  constructor(detail: string) { super(`gateway onboarding failed: ${detail}`); this.name = 'OnboardingError'; }
+}

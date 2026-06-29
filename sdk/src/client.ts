@@ -7,7 +7,7 @@ import type {
 import { artifactMessage, criteriaHash, signOffer, verifyOffer } from './crypto.js';
 import { ARC_CHAIN_ID, fundEscrow, readEscrow } from './escrow.js';
 import {
-  AlreadyJudgedError, ArtifactSignatureError, EscrowNotFundedError, InvalidOfferError, PaymentError,
+  AlreadyJudgedError, ArtifactSignatureError, EscrowNotFundedError, InvalidOfferError, OnboardingError, PaymentError,
 } from './errors.js';
 
 const STATUS_FUNDED = 1;
@@ -94,6 +94,58 @@ class PayerApi {
 
 class SellerApi {
   constructor(private vk: Verdikt) {}
+
+  // ── A2: Circle Gateway onboarding ──────────────────────────────────────────────────────────────
+  // A seller pays the sub-cent x402 verdict fee out of its Circle Gateway balance. A fresh seller has
+  // none, so submit() would 402. These three methods let a seller self-fund: gatewayBalance() inspects
+  // it, depositFee() tops it up via the Gateway deposit (approve + deposit — the ONLY funding path; a
+  // raw transfer to the Gateway wallet would burn the funds), and ensureOnboarded() makes submit()
+  // genuinely one-call after a one-time, idempotent setup.
+
+  /** Inspect the seller's balances: Gateway available/total (spendable on fees) + raw wallet USDC. */
+  async gatewayBalance(): Promise<{ availableUsdc: number; totalUsdc: number; walletUsdc: number }> {
+    const b = await this.vk._gateway.getBalances();
+    return {
+      availableUsdc: Number(b.gateway.available) / 1e6,
+      totalUsdc: Number(b.gateway.total) / 1e6,
+      walletUsdc: Number(b.wallet.balance) / 1e6,
+    };
+  }
+
+  /**
+   * Deposit USDC from the seller's wallet into its Circle Gateway balance (approve + deposit in one
+   * call). Throws OnboardingError with the actionable next step if the wallet can't cover the deposit.
+   * NOTE: `availableUsdc` is read right after the deposit and Circle's Gateway balance is
+   * eventually-consistent (a few seconds), so it may not yet reflect this deposit — `depositTxHash`
+   * is the authoritative on-chain proof.
+   */
+  async depositFee(amountUsdc: number): Promise<{ depositTxHash: string; approvalTxHash?: string; depositedUsdc: number; availableUsdc: number }> {
+    if (!(amountUsdc > 0)) throw new OnboardingError(`deposit amount must be > 0 (got ${amountUsdc})`);
+    const wallet = await this.vk._gateway.getUsdcBalance();
+    const haveUsdc = Number(wallet.balance) / 1e6;
+    if (haveUsdc < amountUsdc) {
+      throw new OnboardingError(`seller wallet ${this.vk._gateway.address} holds ${haveUsdc} USDC but needs ${amountUsdc} to deposit — fund it at faucet.circle.com (Arc testnet) and retry`);
+    }
+    const r = await this.vk._gateway.deposit(String(amountUsdc));
+    const bal = await this.gatewayBalance();
+    return { depositTxHash: r.depositTxHash, approvalTxHash: r.approvalTxHash, depositedUsdc: Number(r.amount) / 1e6, availableUsdc: bal.availableUsdc };
+  }
+
+  /**
+   * Idempotent onboarding: ensure the seller has at least `minUsdc` of spendable Gateway balance,
+   * depositing `depositUsdc` if it's short. Safe to call before every submit() — a no-op once funded.
+   * Returns whether a deposit was needed and the resulting available balance.
+   */
+  async ensureOnboarded(opts?: { minUsdc?: number; depositUsdc?: number }): Promise<{ onboarded: boolean; deposited: boolean; availableUsdc: number; depositTxHash?: string }> {
+    const minUsdc = opts?.minUsdc ?? 0.01;
+    const depositUsdc = opts?.depositUsdc ?? 0.05;
+    const bal = await this.gatewayBalance();
+    if (bal.availableUsdc >= minUsdc) return { onboarded: true, deposited: false, availableUsdc: bal.availableUsdc };
+    // A returned depositFee means the deposit confirmed on-chain (it throws otherwise), so the seller
+    // IS onboarded — don't gate on the eventually-consistent balance read, which can still be stale.
+    const dep = await this.depositFee(depositUsdc);
+    return { onboarded: true, deposited: true, availableUsdc: dep.availableUsdc, depositTxHash: dep.depositTxHash };
+  }
 
   /**
    * Verify a Task Offer BEFORE doing any work: the payer's signature + expiry, AND that the escrow is
