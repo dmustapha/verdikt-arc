@@ -52,6 +52,11 @@ export async function recordFunded(workId: string, fundTxHash: string): Promise<
     ON CONFLICT (work_id) DO UPDATE SET status = 'funded', fund_tx_hash = ${fundTxHash}`;
 }
 
+export async function escrowRowExists(workId: string): Promise<boolean> {
+  const r = await sql`SELECT 1 FROM vk_escrows WHERE work_id = ${workId} LIMIT 1`;
+  return r.rows.length > 0;
+}
+
 // H-2 single-shot lock: atomically move an escrow from 'funded' to 'judging'. Returns true ONLY
 // for the one caller that wins the transition; a replay or race against an already-judged/settled
 // workId updates 0 rows → false → 409 upstream. Stops an attacker from re-judging a funded escrow

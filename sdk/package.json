@@ -1,0 +1,31 @@
+{
+  "name": "@verdikt/sdk",
+  "version": "0.1.0",
+  "description": "Verdikt SDK — escrow + evidence-based verification rail between two agents on Arc",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@circle-fin/x402-batching": "^3.2.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}
