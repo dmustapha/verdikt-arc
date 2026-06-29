@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { recoverMessageAddress, keccak256, toBytes } from 'viem';
 import { requireVerdictFee, captureVerdictFee } from '../lib/x402-meter.js';
+import { criteriaHash } from '../lib/task-offer.js';
 import { getTask, recordExternalCall, claimForJudging, escrowRowExists, recordFunded } from '../lib/db.js';
 import { readEscrowOnChain } from '../settlement/escrow-read.js';
 import { runVerdict } from '../engine/orchestrator.js';
@@ -19,11 +20,22 @@ export function artifactMessage(workId: string, payload: string): string {
 // POST /api/verdict — body: { workId, artifact: { type, payload, language?, sig } }
 // The escrow for workId must already be FUNDED (the payer funded it on-chain first).
 verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
-  const { workId, artifact } = req.body as { workId: `0x${string}`; artifact: Artifact & { sig?: `0x${string}` } };
+  const { workId, artifact, criteriaHash: offerHash } = req.body as { workId: `0x${string}`; artifact: Artifact & { sig?: `0x${string}` }; criteriaHash?: `0x${string}` };
   if (!workId || !artifact?.payload) { res.status(400).json({ error: 'workId and artifact required' }); return; }
 
   const task = await getTask(workId);
   if (!task) { res.status(404).json({ error: 'unknown workId — fund the escrow and register the task first' }); return; }
+
+  // B1: if the submission commits to a criteriaHash (from the signed Task Offer the seller accepted),
+  // the criteria we are about to judge against MUST hash to it. Otherwise the payer registered DIFFERENT
+  // criteria than it offered — a bait-and-switch that would judge the seller on terms it never agreed
+  // to. Reject before judging so the offer's criteriaHash is binding, not advisory.
+  if (offerHash) {
+    const storedHash = criteriaHash(task.acceptance);
+    if (storedHash.toLowerCase() !== offerHash.toLowerCase()) {
+      res.status(409).json({ error: 'criteriaHash mismatch: registered criteria differ from the signed offer' }); return;
+    }
+  }
 
   // H-2: bind the artifact under judgment to the worker who owns the task. Without this, anyone who
   // pays the sub-cent fee could submit a crafted artifact against someone else's funded escrow and
