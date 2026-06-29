@@ -6,7 +6,7 @@ import type {
 } from './types.js';
 import { artifactMessage, criteriaHash, signOffer, verifyOffer } from './crypto.js';
 import { ARC_CHAIN_ID, fundEscrow, readEscrow } from './escrow.js';
-import { fundCrossChainEscrow, type CrossChainConfig, type PayoutRoute, type PayoutRoutes } from './crosschain.js';
+import { fundCrossChainEscrow, addressToBytes32, type CrossChainConfig, type PayoutRoute, type PayoutRoutes } from './crosschain.js';
 import {
   AlreadyJudgedError, ArtifactSignatureError, EscrowNotFundedError, InvalidOfferError, OnboardingError, PaymentError,
 } from './errors.js';
@@ -246,7 +246,10 @@ class SellerApi {
    * actually funded on-chain for this seller and amount. Throws InvalidOffer / EscrowNotFunded.
    * Optionally checks the criteriaHash against the criteria the seller intends to satisfy.
    */
-  async acceptOffer(signed: SignedTaskOffer, opts?: { expectedAcceptance?: Acceptance }): Promise<TaskOffer> {
+  async acceptOffer(
+    signed: SignedTaskOffer,
+    opts?: { expectedAcceptance?: Acceptance; expectedPayout?: PayoutRoute },
+  ): Promise<TaskOffer> {
     const { offer, signature } = signed;
     const v = await verifyOffer(offer, signature, Math.floor(nowMs() / 1000));
     if (!v.ok) throw new InvalidOfferError(v.reason ?? 'invalid');
@@ -263,6 +266,20 @@ class SellerApi {
     if (e.worker.toLowerCase() !== offer.seller.toLowerCase()) throw new EscrowNotFundedError(offer.workId, 'escrow seller mismatch');
     const expected = BigInt(Math.round(offer.amountUsdc * 1e6));
     if (e.amount !== expected) throw new EscrowNotFundedError(offer.workId, `amount ${e.amount} != offered ${expected}`);
+
+    // Cross-chain safety: if the seller wants to be paid on a specific chain/address, verify the
+    // escrow ALREADY commits to it on-chain before doing any work — a payer cannot point the release
+    // at a different recipient. (Routes are immutable once funded; the settlement wallet only reads them.)
+    if (opts?.expectedPayout) {
+      const wantRcpt = addressToBytes32(opts.expectedPayout.recipient).toLowerCase();
+      if (e.workerPayoutDomain !== opts.expectedPayout.domain
+        || e.workerPayoutRecipient.toLowerCase() !== wantRcpt) {
+        throw new InvalidOfferError(
+          `payout route mismatch: escrow pays domain ${e.workerPayoutDomain} ${e.workerPayoutRecipient}, `
+          + `expected domain ${opts.expectedPayout.domain} ${wantRcpt}`,
+        );
+      }
+    }
     return offer;
   }
 

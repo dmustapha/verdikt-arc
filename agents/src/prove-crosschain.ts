@@ -69,8 +69,10 @@ async function main() {
   line(`  LEG 2 fund (Arc):            ${ARC_TX}${t.fundTxHash}`);
   line(`  escrow holds (fee-net): ${t.escrowedUsdc} USDC`);
 
-  line('\n· seller accepting + submitting the deliverable…');
-  await seller.seller.acceptOffer(t.offer);
+  line('\n· seller accepting (verifying the escrow commits to paying it on its chain)…');
+  await seller.seller.acceptOffer(t.offer, {
+    expectedPayout: { domain: destInfo.cctpDomain, recipient: sellerAddr },
+  });
   const artifact: Artifact = { type: 'tool_output', payload: JSON.stringify({ symbol: 'ARC-USDC', price: 1.0 }) };
   const seen = new Set<string>();
   const result = await seller.seller.submit({
