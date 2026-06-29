@@ -29,9 +29,17 @@ const { workId, offer } = await vk.payer.createTask({
 // hand `offer` (a SignedTaskOffer) to the seller, off-band or via your own channel
 ```
 
-## Seller (provider) — verify, deliver, get judged
+## Seller (provider) — onboard, verify, deliver, get judged
 ```ts
 const vk = new Verdikt({ endpoint, rpcUrl, signer: { privateKey: SELLER_KEY } });
+
+// One-time, idempotent: ensure the seller has spendable Circle Gateway balance to pay verdict fees.
+// Deposits from the seller's own wallet (approve + deposit — never a raw transfer). A no-op once funded.
+await vk.seller.ensureOnboarded();                       // or { minUsdc, depositUsdc }
+// Inspect any time: { availableUsdc, totalUsdc, walletUsdc }
+const bal = await vk.seller.gatewayBalance();
+// Top up explicitly if you prefer: returns the on-chain depositTxHash (balance is eventually-consistent).
+// await vk.seller.depositFee(0.05);
 
 // Verifies the payer signature AND that the escrow is really funded on-chain BEFORE doing work.
 await vk.seller.acceptOffer(offer, { expectedAcceptance });
@@ -47,7 +55,7 @@ switch (result.status) {
 ```
 
 ## Errors (typed)
-`EscrowNotFundedError` (offer not backed on-chain) · `InvalidOfferError` (bad signature / expired / criteria mismatch) · `ArtifactSignatureError` (403) · `AlreadyJudgedError` (409 replay) · `PaymentError` (fee not authorized).
+`EscrowNotFundedError` (offer not backed on-chain) · `InvalidOfferError` (bad signature / expired / criteria mismatch) · `ArtifactSignatureError` (403) · `AlreadyJudgedError` (409 replay) · `PaymentError` (fee not authorized) · `OnboardingError` (wallet can't cover the Gateway deposit — fund it at faucet.circle.com).
 
 ## Notes
 - Arc testnet (chainId 5042002) only, today. The fee is captured only on `release`/`refund`; `abstain` is free.
