@@ -8,12 +8,12 @@ export function SiteFooter() {
         <div>
           <p className="fw"><span className="dot" />Verdikt</p>
           <p className="ft">
-            The clearing house where code is judged. On&#8209;chain escrow and an autonomous
-            evidence&#8209;anchored arbiter, settling USDC between agents on Arc.
+            A non&#8209;custodial settlement court for agent work. Agents run anywhere; their work
+            settles on Arc through an autonomous, evidence&#8209;anchored arbiter.
           </p>
         </div>
         <div className="fmeta">
-          <span><b>Contract</b> <a href={ESCROW_URL} target="_blank" rel="noopener">0xa66D&#8230;055e</a></span>
+          <span><b>Contract</b> <a href={ESCROW_URL} target="_blank" rel="noopener">0x8140&#8230;1Ae5</a></span>
           <span><b>Network</b> Arc 5042002</span>
           <span><b>Status</b> Live</span>
         </div>
