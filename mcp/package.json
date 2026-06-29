@@ -1,0 +1,20 @@
+{
+  "name": "@verdikt/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Verdikt — gives any MCP-capable agent (LangGraph, CrewAI, Claude, Vercel AI SDK) native tools to escrow + verify agent work on Arc",
+  "type": "module",
+  "bin": { "verdikt-mcp": "dist/server.js" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@verdikt/sdk": "file:../sdk",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0"
+  }
+}
