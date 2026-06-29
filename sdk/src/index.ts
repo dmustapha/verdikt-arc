@@ -6,10 +6,10 @@ export {
   AlreadyJudgedError, PaymentError, OnboardingError,
 } from './errors.js';
 export { criteriaHash, artifactMessage, offerMessage, verifyOffer } from './crypto.js';
-export { readEscrow, ARC_CHAIN_ID } from './escrow.js';
+export { readEscrow, ARC_CHAIN_ID, type EscrowState, type RawPayoutRoutes } from './escrow.js';
 export {
-  depositForBurnWithHook, pollAttestation, mintAndFund, fundCrossChainEscrow,
-  addressToBytes32, encodeHookData, type CrossChainConfig,
-  BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CCTP_DOMAIN, ARC_CCTP_DOMAIN,
-  BASE_SEPOLIA_TOKEN_MESSENGER, BASE_SEPOLIA_USDC, ARC_MESSAGE_TRANSMITTER,
+  depositForBurnWithHook, pollAttestation, mintAndFund, relayOutbound, fundCrossChainEscrow,
+  addressToBytes32, encodeHookData, chainInfo,
+  CHAINS, type ChainKey, type ChainInfo, type CrossChainConfig, type PayoutRoute, type PayoutRoutes,
+  ARC_CCTP_DOMAIN, TOKEN_MESSENGER_V2, MESSAGE_TRANSMITTER_V2,
 } from './crosschain.js';

@@ -14,7 +14,7 @@ const short = (h?: string | null) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` :
 
 export default async function ProofPage() {
   const [rows, fees] = await Promise.all([getLedger(20), getExternalFeeSum()]);
-  const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x06928fF83Dd7C1A2779bf8FB35ADfaaaDaf0F278';
+  const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0xf6490e2A74bE9c8F5ED50aD184Af0d360E659A23';
 
   // F-005 live round-trip on the most recent settled run: on-chain anchor == DB mirror == hash
   // recomputed in the browser tier from the stored bundle. Three independent sources, one hash.

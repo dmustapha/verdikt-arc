@@ -12,20 +12,39 @@ const payer = '0x00000000000000000000000000000000000000A1' as const;
 const worker = '0x00000000000000000000000000000000000000B0' as const;
 
 describe('cross-chain hookData encoding', () => {
-  it('encodes exactly 96 bytes (3 * 32) for abi.decode', () => {
+  it('encodes exactly 224 bytes (7 * 32) for abi.decode', () => {
     const hex = encodeHookData(workId, payer, worker);
-    expect((hex.length - 2) / 2).toBe(96);
+    expect((hex.length - 2) / 2).toBe(224);
   });
 
-  it('round-trips through abi.decode (mirrors the Solidity hook decode)', () => {
+  it('round-trips through abi.decode (mirrors the Solidity hook decode, local routes)', () => {
     const hex = encodeHookData(workId, payer, worker);
-    const [id, p, w] = decodeAbiParameters(
-      [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' }],
+    const [id, p, w, wDom, , pDom] = decodeAbiParameters(
+      [
+        { type: 'bytes32' }, { type: 'address' }, { type: 'address' },
+        { type: 'uint32' }, { type: 'bytes32' }, { type: 'uint32' }, { type: 'bytes32' },
+      ],
       hex,
     );
     expect(id).toBe(workId);
     expect((p as string).toLowerCase()).toBe(payer.toLowerCase());
     expect((w as string).toLowerCase()).toBe(worker.toLowerCase());
+    expect(Number(wDom)).toBe(0); // local
+    expect(Number(pDom)).toBe(0);
+  });
+
+  it('encodes cross-chain payout routes (seller on Base domain 6)', () => {
+    const sellerOnBase = '0x000000000000000000000000000000000000bA5E' as const;
+    const hex = encodeHookData(workId, payer, worker, { worker: { domain: 6, recipient: sellerOnBase } });
+    const [, , , wDom, wRcpt] = decodeAbiParameters(
+      [
+        { type: 'bytes32' }, { type: 'address' }, { type: 'address' },
+        { type: 'uint32' }, { type: 'bytes32' }, { type: 'uint32' }, { type: 'bytes32' },
+      ],
+      hex,
+    );
+    expect(Number(wDom)).toBe(6);
+    expect((wRcpt as string).toLowerCase().endsWith('ba5e')).toBe(true);
   });
 
   it('left-pads an address to a 32-byte CCTP recipient', () => {

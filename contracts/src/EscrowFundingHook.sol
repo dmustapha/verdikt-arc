@@ -10,10 +10,22 @@ interface IReceiverV2 {
         returns (bool);
 }
 
-/// @dev VerdiktEscrow cross-chain funding entrypoint.
+/// @dev VerdiktEscrow cross-chain funding entrypoint + payout-route shape (mirrors the contract).
 interface IVerdiktEscrow {
-    function fundCrossChain(bytes32 workId, address payer, address worker, uint256 amount)
-        external;
+    struct PayoutRoutes {
+        uint32 workerDomain;
+        bytes32 workerRecipient;
+        uint32 payerDomain;
+        bytes32 payerRecipient;
+    }
+
+    function fundCrossChain(
+        bytes32 workId,
+        address payer,
+        address worker,
+        uint256 amount,
+        PayoutRoutes calldata routes
+    ) external;
 }
 
 /// @title EscrowFundingHook
@@ -33,8 +45,9 @@ contract EscrowFundingHook {
     // CCTP V2 message layout: hookData is the trailing field of the message body.
     // 148 (MessageV2 header) + 228 (BurnMessageV2 hookData offset) = 376. hookData runs to the end.
     uint256 private constant HOOK_DATA_OFFSET = 376;
-    // hookData = abi.encode(bytes32 workId, address payer, address worker) = 3 * 32 bytes.
-    uint256 private constant HOOK_DATA_LEN = 96;
+    // hookData = abi.encode(workId, payer, worker, workerDomain, workerRecipient, payerDomain,
+    // payerRecipient) = 7 * 32 bytes. The payout routes let the buyer settle/refund cross-chain too.
+    uint256 private constant HOOK_DATA_LEN = 224;
 
     bool private locked;
 
@@ -82,11 +95,20 @@ contract EscrowFundingHook {
         uint256 minted = usdc.balanceOf(address(this)) - balBefore;
         require(minted > 0, "nothing minted");
 
-        (bytes32 workId, address payer, address worker) =
-            abi.decode(message[HOOK_DATA_OFFSET:], (bytes32, address, address));
+        (
+            bytes32 workId, address payer, address worker,
+            uint32 workerDomain, bytes32 workerRecipient,
+            uint32 payerDomain, bytes32 payerRecipient
+        ) = abi.decode(
+            message[HOOK_DATA_OFFSET:],
+            (bytes32, address, address, uint32, bytes32, uint32, bytes32)
+        );
 
         usdc.approve(address(escrow), minted);
-        escrow.fundCrossChain(workId, payer, worker, minted);
+        escrow.fundCrossChain(
+            workId, payer, worker, minted,
+            IVerdiktEscrow.PayoutRoutes(workerDomain, workerRecipient, payerDomain, payerRecipient)
+        );
         emit CrossChainFunded(workId, payer, worker, minted);
     }
 
@@ -111,7 +133,11 @@ contract EscrowFundingHook {
         require(amount > 0, "amount=0");
         require(usdc.balanceOf(address(this)) >= amount, "insufficient balance");
         usdc.approve(address(escrow), amount);
-        escrow.fundCrossChain(workId, payer, worker, amount);
+        // Recovery fallback funds with LOCAL (Arc) payout routes — the operator settles manually.
+        escrow.fundCrossChain(
+            workId, payer, worker, amount,
+            IVerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0))
+        );
         emit CrossChainFunded(workId, payer, worker, amount);
     }
 

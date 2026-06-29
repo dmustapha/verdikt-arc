@@ -16,6 +16,14 @@ export const arcTestnet = defineChain({
   testnet: true,
 });
 
+// Payout-routes tuple mirrors VerdiktEscrow.PayoutRoutes (worker/payer cross-chain payout).
+const PAYOUT_ROUTES_TUPLE = {
+  name: 'routes', type: 'tuple', components: [
+    { name: 'workerDomain', type: 'uint32' }, { name: 'workerRecipient', type: 'bytes32' },
+    { name: 'payerDomain', type: 'uint32' }, { name: 'payerRecipient', type: 'bytes32' },
+  ],
+} as const;
+
 // Minimal escrow ABI: fund (EIP-3009 receiveWithAuthorization path) + read.
 const ESCROW_ABI = [
   {
@@ -24,6 +32,7 @@ const ESCROW_ABI = [
       { name: 'workId', type: 'bytes32' }, { name: 'worker', type: 'address' },
       { name: 'amount', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
       { name: 'validBefore', type: 'uint256' }, { name: 'sig', type: 'bytes' },
+      PAYOUT_ROUTES_TUPLE,
     ],
     outputs: [],
   },
@@ -35,6 +44,8 @@ const ESCROW_ABI = [
         { name: 'payer', type: 'address' }, { name: 'worker', type: 'address' }, { name: 'amount', type: 'uint256' },
         { name: 'status', type: 'uint8' }, { name: 'outcome', type: 'uint8' }, { name: 'verdictCode', type: 'uint8' },
         { name: 'evidenceHash', type: 'bytes32' },
+        { name: 'workerPayoutDomain', type: 'uint32' }, { name: 'workerPayoutRecipient', type: 'bytes32' },
+        { name: 'payerPayoutDomain', type: 'uint32' }, { name: 'payerPayoutRecipient', type: 'bytes32' },
       ],
     }],
   },
@@ -53,7 +64,19 @@ function rpc(rpcUrl?: string) { return http(rpcUrl ?? DEFAULT_RPC); }
 export interface EscrowState {
   payer: `0x${string}`; worker: `0x${string}`; amount: bigint;
   status: number; outcome: number; verdictCode: number; evidenceHash: `0x${string}`;
+  workerPayoutDomain: number; workerPayoutRecipient: `0x${string}`;
+  payerPayoutDomain: number; payerPayoutRecipient: `0x${string}`;
 }
+
+// Raw payout-routes tuple passed to fundWithAuthorization (local = all zero).
+export interface RawPayoutRoutes {
+  workerDomain: number; workerRecipient: `0x${string}`;
+  payerDomain: number; payerRecipient: `0x${string}`;
+}
+const LOCAL_ROUTES: RawPayoutRoutes = {
+  workerDomain: 0, workerRecipient: `0x${'00'.repeat(32)}`,
+  payerDomain: 0, payerRecipient: `0x${'00'.repeat(32)}`,
+};
 
 export async function readEscrow(escrow: `0x${string}`, workId: `0x${string}`, rpcUrl?: string): Promise<EscrowState> {
   const pub = createPublicClient({ chain: arcTestnet, transport: rpc(rpcUrl) });
@@ -78,6 +101,7 @@ export async function fundEscrow(params: {
   nowMs: number;            // injected for determinism/testability
   usdcName?: string;
   usdcVersion?: string;
+  routes?: RawPayoutRoutes; // optional cross-chain payout routes (default: local Arc)
 }): Promise<`0x${string}`> {
   const { account } = params;
   if (!account.signTypedData) throw new Error('signer cannot sign typed data');
@@ -107,7 +131,7 @@ export async function fundEscrow(params: {
 
   const data = encodeFunctionData({
     abi: ESCROW_ABI, functionName: 'fundWithAuthorization',
-    args: [params.workId, params.seller, value, validAfter, validBefore, signature],
+    args: [params.workId, params.seller, value, validAfter, validBefore, signature, params.routes ?? LOCAL_ROUTES],
   });
   const hash = await wallet.sendTransaction({ to: params.escrow, data });
   const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 30_000 });

@@ -8,7 +8,7 @@ Verdikt is a settlement court that sits between two agents that have never met. 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 [![Foundry](https://img.shields.io/badge/Foundry-Solidity-orange)](https://book.getfoundry.sh/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-155_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-210_passing-brightgreen)]()
 
 **Live:** [verdikt-arc.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)
 
@@ -44,7 +44,7 @@ Verdikt replaces the opinion with evidence. The payer defines acceptance criteri
 
 ```
    PAYER AGENT                  VERDIKT ESCROW (Arbiter)                WORKER AGENT
-   (Buyer)                      0x8140...1Ae5 on Arc                    (Seller)
+   (Buyer)                      0xf649...9A23 on Arc                    (Seller)
       |                                  |                                  |
       |  1. escrow USDC (EIP-3009)       |                                  |
       |--------------------------------->|                                  |
@@ -126,10 +126,10 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
 
 ```bash
 # Worker (verdict engine + real Docker sandbox)
-cd worker && npm test          # 112/112 passing
+cd worker && npm test          # 117/117 passing
 
 # Contracts (escrow invariants, access control, reentrancy, front-run, sweep)
-cd contracts && forge test     # 34/34 passing
+cd contracts && forge test     # 67/67 passing
 
 # Root integration (schema + on-chain code maps + web↔worker hash parity)
 npm test                       # 9/9 passing
@@ -186,21 +186,21 @@ The deterministic floor and the three routes ship with stronger, evidence-ground
 ## Smart Contracts
 | Contract | Address | Chain | Description |
 |----------|---------|-------|-------------|
-| `VerdiktEscrow` | `0x06928fF83Dd7C1A2779bf8FB35ADfaaaDaf0F278` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
-| `EscrowFundingHook` | `0x528B9D7b774dFd29ee538069f1cEb9FD0584bC44` | Arc testnet (5042002) | CCTP V2 wrapper — turns a cross-chain USDC transfer into a funded escrow atomically |
+| `VerdiktEscrow` | `0xf6490e2A74bE9c8F5ED50aD184Af0d360E659A23` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
+| `EscrowFundingHook` | `0x3b485C1228b215ac875C2Bea862a7f0B48CdB079` | Arc testnet (5042002) | CCTP V2 wrapper — turns a cross-chain USDC transfer into a funded escrow atomically |
 
 ## On-Chain Verification
 Every settlement is a real Arc transaction that moves USDC. The full set from the live deep-test run on the deployed contract (explorer: `testnet.arcscan.app`), each confirmed `status=0x1`:
 
 | Flow | Verdict | Outcome | Transaction |
 |------|---------|---------|-------------|
-| Good code | pass | release (worker) | `0x845420ba9de5a70b6e0d5d1e2bfdc56cc9bdf7041d2071a64afe01063febf70a` |
-| Bad code (failed test) | fail | refund (payer) | `0x4f860eecadf989944f6609b90249d916b6b502e5013012d9f2408676ce0ceb5f` |
-| Unsupported answer | abstain | refund-default (payer) | `0x8d753e18194571bdcbf38bcc2939f96462d252a24e409346637e467fd47ccdbe` |
-| Schema valid | pass | release (worker) | `0x275c4f17faa97031ad65dbf19f0364425f0f6bf3268ce2fb52b30f7698f356c9` |
-| Schema invalid | fail | refund (payer) | `0xdf020f7abb4866f55769fc0c3c12ff31fe4fc04f5de6796faaea28893a3ef8ee` |
+| Good code | pass | release (worker) | `0x4da35529ab207788faddf7eb8c2e148baa9ff24a72ad64e73f3128fbfa2e0421` |
+| Bad code (failed test) | fail | refund (payer) | `0x1fa55a409005742bec188b9a407cbf856787921da66ca11291943f9bb82163da` |
+| Unsupported answer | abstain | refund-default (payer) | `0x79a361629ed367839ceb3f2053f026ef9316e5c46a5492abbb11a901db5e3f39` |
+| Schema valid | pass | release (worker) | `0xbb8dd91094002823b4a8b9afe76ac7567e5fcb2e6240e9975b6fa478acb78e37` |
+| Schema invalid | fail | refund (payer) | `0xce19d852a0fd3984ae9674b4fe217f997893d83d80a0f71835bc15788aa303c2` |
 
-Contract deployed at `0x06928fF83Dd7C1A2779bf8FB35ADfaaaDaf0F278` (deploy tx `0x52005c83f5ebbe6b84dfa81d01cdab639dffcc63bf6609b6191afdb1281f1e3c`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
+Contract deployed at `0xf6490e2A74bE9c8F5ED50aD184Af0d360E659A23` (deploy tx `0xef978ee7e5ad186fd43ff886928af6b4b05587df77fac761e5ce42e590da50d5`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
 
 ---
 

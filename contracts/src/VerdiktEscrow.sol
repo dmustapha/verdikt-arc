@@ -4,13 +4,35 @@ pragma solidity ^0.8.24;
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IERC3009} from "./interfaces/IERC3009.sol";
 
+/// @dev Circle CCTP V2 TokenMessengerV2 on Arc — used to pay a seller/payer OUT to their home chain.
+interface ITokenMessengerV2 {
+    function depositForBurn(
+        uint256 amount,
+        uint32 destinationDomain,
+        bytes32 mintRecipient,
+        address burnToken,
+        bytes32 destinationCaller,
+        uint256 maxFee,
+        uint32 minFinalityThreshold
+    ) external;
+}
+
 /// @title VerdiktEscrow
 /// @notice Holds a payer agent's USDC against a task; settles to worker (release),
 ///         payer (refund), or payer-default (abstain) only on an authorized verdict,
-///         anchoring the verdict code + evidence hash on-chain.
+///         anchoring the verdict code + evidence hash on-chain. Both parties may declare a
+///         cross-chain payout route (any CCTP V2 chain): Arc is the neutral clearing house —
+///         neither agent has to live here, the money just settles here and is paid out home.
 contract VerdiktEscrow {
     // Arc testnet USDC predeploy (6 decimals). Fixed — not configurable.
     address public constant USDC = 0x3600000000000000000000000000000000000000;
+
+    // Arc CCTP V2 TokenMessengerV2 (deterministic; verified on-chain via localMessageTransmitter()).
+    ITokenMessengerV2 private constant TOKEN_MESSENGER =
+        ITokenMessengerV2(0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA);
+    // Arc is a STANDARD-only CCTP source, but reaches hard finality in ~1 block (~0.5s) and charges
+    // NO fee on standard transfers — so an outbound payout is effectively fast AND exact (no fee math).
+    uint32 private constant OUTBOUND_FINALITY = 2000;
 
     uint8 private constant STATUS_EMPTY = 0;
     uint8 private constant STATUS_FUNDED = 1;
@@ -28,6 +50,21 @@ contract VerdiktEscrow {
         uint8 outcome; // valid when SETTLED
         uint8 verdictCode; // 0 pass,1 fail,2 partial,3 abstain
         bytes32 evidenceHash; // anchored evidence commitment
+        // Optional cross-chain payout routes (any CCTP V2 domain). recipient == 0 => pay locally on
+        // Arc to the on-chain payer/worker address. Bound at fund time from the signed offer, so the
+        // settlement wallet cannot redirect funds (it only reads these).
+        uint32 workerPayoutDomain;
+        bytes32 workerPayoutRecipient; // where a RELEASE pays the seller
+        uint32 payerPayoutDomain;
+        bytes32 payerPayoutRecipient; // where a REFUND/ABSTAIN returns the buyer's money
+    }
+
+    /// @notice Payout routes a payer commits at fund time (mirrors the signed offer).
+    struct PayoutRoutes {
+        uint32 workerDomain;
+        bytes32 workerRecipient;
+        uint32 payerDomain;
+        bytes32 payerRecipient;
     }
 
     mapping(bytes32 => Escrow) private escrows;
@@ -51,6 +88,14 @@ contract VerdiktEscrow {
     );
     event VerdictUpdated(address indexed oldVerdict, address indexed newVerdict);
     event HookSet(address indexed oldHook, address indexed newHook);
+    // Emitted alongside Settled when the payout is bridged out to another chain via CCTP.
+    event CrossChainPayout(
+        bytes32 indexed workId,
+        uint8 outcome,
+        uint32 destinationDomain,
+        bytes32 recipient,
+        uint256 amount
+    );
 
     modifier onlyVerdict() {
         require(msg.sender == verdict, "not verdict");
@@ -91,9 +136,13 @@ contract VerdiktEscrow {
     ///         hook cannot fund a task the payer did not commit to.
     /// @dev    Checks-effects-interactions: record the escrow + bump totalEscrowed BEFORE the
     ///         external transferFrom. (USDC has no transfer callback, but CEI removes all doubt.)
-    function fundCrossChain(bytes32 workId, address payer, address worker, uint256 amount)
-        external
-    {
+    function fundCrossChain(
+        bytes32 workId,
+        address payer,
+        address worker,
+        uint256 amount,
+        PayoutRoutes calldata routes
+    ) external {
         require(msg.sender == hook, "not hook");
         require(escrows[workId].status == STATUS_EMPTY, "workId exists");
         require(amount > 0, "amount=0");
@@ -108,7 +157,11 @@ contract VerdiktEscrow {
             status: STATUS_FUNDED,
             outcome: 0,
             verdictCode: 0,
-            evidenceHash: bytes32(0)
+            evidenceHash: bytes32(0),
+            workerPayoutDomain: routes.workerDomain,
+            workerPayoutRecipient: routes.workerRecipient,
+            payerPayoutDomain: routes.payerDomain,
+            payerPayoutRecipient: routes.payerRecipient
         });
 
         require(IERC20(USDC).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
@@ -131,7 +184,8 @@ contract VerdiktEscrow {
         uint256 amount,
         uint256 validAfter,
         uint256 validBefore,
-        bytes calldata sig
+        bytes calldata sig,
+        PayoutRoutes calldata routes
     ) external {
         require(escrows[workId].status == STATUS_EMPTY, "workId exists");
         require(amount > 0, "amount=0");
@@ -151,7 +205,11 @@ contract VerdiktEscrow {
             status: STATUS_FUNDED,
             outcome: 0,
             verdictCode: 0,
-            evidenceHash: bytes32(0)
+            evidenceHash: bytes32(0),
+            workerPayoutDomain: routes.workerDomain,
+            workerPayoutRecipient: routes.workerRecipient,
+            payerPayoutDomain: routes.payerDomain,
+            payerPayoutRecipient: routes.payerRecipient
         });
         emit Funded(workId, msg.sender, worker, amount);
     }
@@ -177,12 +235,28 @@ contract VerdiktEscrow {
         e.outcome = outcome;
         e.verdictCode = verdictCode;
         e.evidenceHash = evidenceHash;
-        totalEscrowed -= e.amount;
+        uint256 amount = e.amount;
+        totalEscrowed -= amount;
 
-        address to = outcome == OUTCOME_RELEASE ? e.worker : e.payer;
-        require(IERC20(USDC).transfer(to, e.amount), "transfer failed");
+        bool toWorker = outcome == OUTCOME_RELEASE;
+        address localTo = toWorker ? e.worker : e.payer;
+        uint32 dom = toWorker ? e.workerPayoutDomain : e.payerPayoutDomain;
+        bytes32 rcpt = toWorker ? e.workerPayoutRecipient : e.payerPayoutRecipient;
 
-        emit Settled(workId, outcome, to, e.amount, verdictCode, evidenceHash);
+        if (rcpt == bytes32(0)) {
+            // Local payout: the party receives USDC here on Arc.
+            require(IERC20(USDC).transfer(localTo, amount), "transfer failed");
+        } else {
+            // Cross-chain payout: burn the principal to the party's home chain via CCTP V2. Arc is a
+            // standard, fee-free source with ~0.5s finality, so the recipient gets the exact amount.
+            require(IERC20(USDC).approve(address(TOKEN_MESSENGER), amount), "approve failed");
+            TOKEN_MESSENGER.depositForBurn(amount, dom, rcpt, USDC, bytes32(0), 0, OUTBOUND_FINALITY);
+            emit CrossChainPayout(workId, outcome, dom, rcpt, amount);
+            // Reflect the true (home-chain) recipient in Settled.to for ledger/UI honesty.
+            localTo = address(uint160(uint256(rcpt)));
+        }
+
+        emit Settled(workId, outcome, localTo, amount, verdictCode, evidenceHash);
     }
 
     /// @notice Recover USDC sitting in the contract that is NOT backing a funded escrow (e.g. a

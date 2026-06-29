@@ -2,40 +2,95 @@ import {
   createWalletClient, createPublicClient, http, parseUnits, pad,
   encodeAbiParameters, encodeFunctionData, defineChain,
 } from 'viem';
-import type { Account } from 'viem';
+import type { Account, Chain } from 'viem';
 import { arcTestnet, DEFAULT_RPC as ARC_RPC } from './escrow.js';
 
-// ── CCTP V2 constants (Base Sepolia → Arc) ──────────────────────────────────────────────────────
-// CCTP core does NOT execute hooks: depositForBurnWithHook carries hookData as opaque metadata and
-// mints USDC to mintRecipient with no callback. We set mintRecipient = destinationCaller = the Arc
-// EscrowFundingHook, then relay (message, attestation) into hook.mintAndFund, which mints to itself
-// and funds the escrow atomically. See contracts/src/EscrowFundingHook.sol.
+// ── CCTP V2 multi-chain registry (Circle-verified testnet values) ───────────────────────────────
+// Verdikt is the neutral clearing house: a buyer agent on ANY of these chains funds an Arc escrow,
+// and on settlement the seller (or refunded buyer) is paid OUT to ANY of these chains. Neither agent
+// has to live on Arc — the money just meets and settles there. CCTP core does NOT execute hooks, so
+// inbound funding goes through the Arc EscrowFundingHook (mintRecipient + destinationCaller); outbound
+// payout is a plain depositForBurn from the escrow on Arc.
 
-export const BASE_SEPOLIA_CHAIN_ID = 84532;
+// TokenMessengerV2 + MessageTransmitterV2 are the SAME deterministic address on every CCTP V2 chain.
+export const TOKEN_MESSENGER_V2 = '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA' as const;
+export const MESSAGE_TRANSMITTER_V2 = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' as const;
 export const ARC_CCTP_DOMAIN = 26;
-export const BASE_SEPOLIA_CCTP_DOMAIN = 6;
-
-// CCTP V2 testnet TokenMessengerV2 (same deterministic address across testnet chains).
-export const BASE_SEPOLIA_TOKEN_MESSENGER =
-  '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA' as const;
-// Circle USDC on Base Sepolia (6 decimals).
-export const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as const;
-// Arc MessageTransmitterV2 (receiveMessage lives here; the hook calls it).
-export const ARC_MESSAGE_TRANSMITTER =
-  '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' as const;
-
 export const IRIS_SANDBOX = 'https://iris-api-sandbox.circle.com';
-// Fast Transfer: minFinalityThreshold <= 1000 → ~8-20s, small fee. Standard (>=2000) is fee-free
-// but gates on source hard finality (~15min) — too slow for a live demo.
+// Fast Transfer (~8-20s, small fee) for chains that support it as a source; Arc is standard-only but
+// reaches finality in ~0.5s and charges no fee, so outbound payouts are still seconds + exact.
 export const FAST_FINALITY_THRESHOLD = 1000;
+export const STANDARD_FINALITY_THRESHOLD = 2000;
 
-export const baseSepolia = defineChain({
-  id: BASE_SEPOLIA_CHAIN_ID,
-  name: 'Base Sepolia',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: { default: { http: ['https://sepolia.base.org'] } },
-  testnet: true,
-});
+export interface ChainInfo {
+  key: string;
+  name: string;
+  cctpDomain: number;
+  chainId: number;
+  usdc: `0x${string}`;
+  rpcUrl: string;
+  explorerTx: string; // base, append the tx hash
+  nativeSymbol: string;
+  fastSource: boolean; // CCTP Fast Transfer supported as a source
+  agentNote?: string;  // why this chain matters for the agent economy
+}
+
+// The popular agent chains. Lead corridor = Ethereum Sepolia (ERC-8004 agents) ↔ Base Sepolia (x402).
+export const CHAINS: Record<string, ChainInfo> = {
+  ethereumSepolia: {
+    key: 'ethereumSepolia', name: 'Ethereum Sepolia', cctpDomain: 0, chainId: 11155111,
+    usdc: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com',
+    explorerTx: 'https://sepolia.etherscan.io/tx/', nativeSymbol: 'ETH', fastSource: true,
+    agentNote: 'ERC-8004 trustless-agents identity/reputation registry',
+  },
+  baseSepolia: {
+    key: 'baseSepolia', name: 'Base Sepolia', cctpDomain: 6, chainId: 84532,
+    usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', rpcUrl: 'https://sepolia.base.org',
+    explorerTx: 'https://sepolia.basescan.org/tx/', nativeSymbol: 'ETH', fastSource: true,
+    agentNote: 'x402 / Coinbase AgentKit — the densest agents-that-pay community',
+  },
+  arbitrumSepolia: {
+    key: 'arbitrumSepolia', name: 'Arbitrum Sepolia', cctpDomain: 3, chainId: 421614,
+    usdc: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', rpcUrl: 'https://sepolia-rollup.arbitrum.io/rpc',
+    explorerTx: 'https://sepolia.arbiscan.io/tx/', nativeSymbol: 'ETH', fastSource: true,
+  },
+  opSepolia: {
+    key: 'opSepolia', name: 'OP Sepolia', cctpDomain: 2, chainId: 11155420,
+    usdc: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7', rpcUrl: 'https://sepolia.optimism.io',
+    explorerTx: 'https://sepolia-optimism.etherscan.io/tx/', nativeSymbol: 'ETH', fastSource: true,
+  },
+  avalancheFuji: {
+    key: 'avalancheFuji', name: 'Avalanche Fuji', cctpDomain: 1, chainId: 43113,
+    usdc: '0x5425890298aed601595a70AB815c96711a31Bc65', rpcUrl: 'https://api.avax-test.network/ext/bc/C/rpc',
+    explorerTx: 'https://testnet.snowtrace.io/tx/', nativeSymbol: 'AVAX', fastSource: false,
+  },
+  polygonAmoy: {
+    key: 'polygonAmoy', name: 'Polygon Amoy', cctpDomain: 7, chainId: 80002,
+    usdc: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', rpcUrl: 'https://rpc-amoy.polygon.technology',
+    explorerTx: 'https://amoy.polygonscan.com/tx/', nativeSymbol: 'POL', fastSource: false,
+  },
+  lineaSepolia: {
+    key: 'lineaSepolia', name: 'Linea Sepolia', cctpDomain: 11, chainId: 59141,
+    usdc: '0xFEce4462D57bD51A6A552365A011b95f0E16d9B7', rpcUrl: 'https://rpc.sepolia.linea.build',
+    explorerTx: 'https://sepolia.lineascan.build/tx/', nativeSymbol: 'ETH', fastSource: true,
+  },
+};
+
+export type ChainKey = keyof typeof CHAINS;
+
+export function chainInfo(key: ChainKey | string): ChainInfo {
+  const c = CHAINS[key];
+  if (!c) throw new Error(`unknown chain "${key}" — known: ${Object.keys(CHAINS).join(', ')}`);
+  return c;
+}
+
+function viemChain(c: ChainInfo, rpcOverride?: string): Chain {
+  return defineChain({
+    id: c.chainId, name: c.name,
+    nativeCurrency: { name: c.nativeSymbol, symbol: c.nativeSymbol, decimals: 18 },
+    rpcUrls: { default: { http: [rpcOverride ?? c.rpcUrl] } }, testnet: true,
+  });
+}
 
 const ERC20_APPROVE_ABI = [{
   type: 'function', name: 'approve', stateMutability: 'nonpayable',
@@ -46,14 +101,10 @@ const ERC20_APPROVE_ABI = [{
 const TOKEN_MESSENGER_ABI = [{
   type: 'function', name: 'depositForBurnWithHook', stateMutability: 'nonpayable',
   inputs: [
-    { name: 'amount', type: 'uint256' },
-    { name: 'destinationDomain', type: 'uint32' },
-    { name: 'mintRecipient', type: 'bytes32' },
-    { name: 'burnToken', type: 'address' },
-    { name: 'destinationCaller', type: 'bytes32' },
-    { name: 'maxFee', type: 'uint256' },
-    { name: 'minFinalityThreshold', type: 'uint32' },
-    { name: 'hookData', type: 'bytes' },
+    { name: 'amount', type: 'uint256' }, { name: 'destinationDomain', type: 'uint32' },
+    { name: 'mintRecipient', type: 'bytes32' }, { name: 'burnToken', type: 'address' },
+    { name: 'destinationCaller', type: 'bytes32' }, { name: 'maxFee', type: 'uint256' },
+    { name: 'minFinalityThreshold', type: 'uint32' }, { name: 'hookData', type: 'bytes' },
   ],
   outputs: [],
 }] as const;
@@ -64,97 +115,125 @@ const HOOK_ABI = [{
   outputs: [],
 }] as const;
 
-/** Left-pad an EVM address to a CCTP bytes32 (mintRecipient / destinationCaller). */
+const RECEIVE_MESSAGE_ABI = [{
+  type: 'function', name: 'receiveMessage', stateMutability: 'nonpayable',
+  inputs: [{ name: 'message', type: 'bytes' }, { name: 'attestation', type: 'bytes' }],
+  outputs: [{ type: 'bool' }],
+}] as const;
+
+/** Left-pad an EVM address to a CCTP bytes32 (mintRecipient / destinationCaller / payout recipient). */
 export function addressToBytes32(addr: `0x${string}`): `0x${string}` {
   return pad(addr, { size: 32 });
 }
 
+/** A cross-chain payout route: where a party is paid OUT on settlement. */
+export interface PayoutRoute {
+  /** Destination CCTP domain (e.g. CHAINS.baseSepolia.cctpDomain). */
+  domain: number;
+  /** Recipient address on the destination chain. */
+  recipient: `0x${string}`;
+}
+
+export interface PayoutRoutes {
+  worker?: PayoutRoute; // where a RELEASE pays the seller; omit = local Arc
+  payer?: PayoutRoute;  // where a REFUND/ABSTAIN returns the buyer; omit = local Arc
+}
+
+const ZERO32 = pad('0x', { size: 32 });
+
 /**
- * Encode the CCTP hookData the Arc hook decodes with abi.decode(_, (bytes32,address,address)).
- * MUST byte-match the Solidity decode — this is abi.encode(workId, payer, worker).
+ * Encode the CCTP hookData the Arc hook decodes with
+ *   abi.decode(_, (bytes32, address, address, uint32, bytes32, uint32, bytes32)).
+ * MUST byte-match the Solidity decode. Omitted routes encode as local (recipient 0).
  */
 export function encodeHookData(
-  workId: `0x${string}`, payer: `0x${string}`, worker: `0x${string}`,
+  workId: `0x${string}`, payer: `0x${string}`, worker: `0x${string}`, routes?: PayoutRoutes,
 ): `0x${string}` {
+  const w = routes?.worker;
+  const p = routes?.payer;
   return encodeAbiParameters(
-    [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' }],
-    [workId, payer, worker],
+    [
+      { type: 'bytes32' }, { type: 'address' }, { type: 'address' },
+      { type: 'uint32' }, { type: 'bytes32' }, { type: 'uint32' }, { type: 'bytes32' },
+    ],
+    [
+      workId, payer, worker,
+      w ? w.domain : 0, w ? addressToBytes32(w.recipient) : ZERO32,
+      p ? p.domain : 0, p ? addressToBytes32(p.recipient) : ZERO32,
+    ],
   );
 }
 
 export interface CrossChainConfig {
   hook: `0x${string}`;          // Arc EscrowFundingHook
-  tokenMessenger?: `0x${string}`; // Base Sepolia TokenMessengerV2
-  sourceUsdc?: `0x${string}`;     // Base Sepolia USDC
-  sourceRpcUrl?: string;          // Base Sepolia RPC
-  arcRpcUrl?: string;             // Arc RPC
-  irisBase?: string;              // Iris attestation API base
+  sourceChain?: ChainKey | string; // which chain the buyer funds from (default baseSepolia)
+  sourceRpcUrl?: string;        // override the source chain RPC
+  arcRpcUrl?: string;           // Arc RPC
+  irisBase?: string;            // Iris attestation API base
 }
 
 /**
- * Burn USDC on Base Sepolia targeting the Arc hook. approve → depositForBurnWithHook. The hookData
- * binds {workId, payer, worker}; mintRecipient and destinationCaller are both the hook (so only the
- * hook can finalize on Arc). Returns the source burn tx hash (explorer leg 1).
+ * Burn USDC on the SOURCE chain targeting the Arc hook, carrying {workId, payer, worker} + optional
+ * cross-chain payout routes in hookData. Returns the source burn tx hash (explorer leg 1).
  */
 export async function depositForBurnWithHook(params: {
   account: Account;
   amountUsdc: number;
   workId: `0x${string}`;
-  payer: `0x${string}`;   // Arc-side refund recipient (must be an address the funder controls on Arc)
+  payer: `0x${string}`;
   worker: `0x${string}`;
+  routes?: PayoutRoutes;
   maxFeeUsdc?: number;
   minFinalityThreshold?: number;
   config: CrossChainConfig;
-}): Promise<{ burnTxHash: `0x${string}` }> {
+}): Promise<{ burnTxHash: `0x${string}`; sourceChain: ChainInfo }> {
   const { account, config } = params;
-  const tokenMessenger = config.tokenMessenger ?? BASE_SEPOLIA_TOKEN_MESSENGER;
-  const usdc = config.sourceUsdc ?? BASE_SEPOLIA_USDC;
-  const transport = http(config.sourceRpcUrl ?? 'https://sepolia.base.org');
-  const wallet = createWalletClient({ account, chain: baseSepolia, transport });
-  const pub = createPublicClient({ chain: baseSepolia, transport });
+  const src = chainInfo(config.sourceChain ?? 'baseSepolia');
+  const chain = viemChain(src, config.sourceRpcUrl);
+  const transport = http(config.sourceRpcUrl ?? src.rpcUrl);
+  const wallet = createWalletClient({ account, chain, transport });
+  const pub = createPublicClient({ chain, transport });
 
   const amount = parseUnits(params.amountUsdc.toFixed(6), 6);
   const maxFee = parseUnits((params.maxFeeUsdc ?? 0.05).toFixed(6), 6);
   const hookBytes32 = addressToBytes32(config.hook);
-  const hookData = encodeHookData(params.workId, params.payer, params.worker);
+  const hookData = encodeHookData(params.workId, params.payer, params.worker, params.routes);
+  // Fast where the source supports it, else standard (Circle treats <1000 as fast, >=2000 as standard).
+  const finality = params.minFinalityThreshold ?? (src.fastSource ? FAST_FINALITY_THRESHOLD : STANDARD_FINALITY_THRESHOLD);
 
-  // 1. approve USDC to the TokenMessenger.
   const approveTx = await wallet.sendTransaction({
-    to: usdc,
-    data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [tokenMessenger, amount] }),
+    to: src.usdc,
+    data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [TOKEN_MESSENGER_V2, amount] }),
   });
-  await pub.waitForTransactionReceipt({ hash: approveTx, timeout: 60_000 });
+  await pub.waitForTransactionReceipt({ hash: approveTx, timeout: 90_000 });
 
-  // 2. burn with hook.
   const burnTxHash = await wallet.sendTransaction({
-    to: tokenMessenger,
+    to: TOKEN_MESSENGER_V2,
     data: encodeFunctionData({
       abi: TOKEN_MESSENGER_ABI, functionName: 'depositForBurnWithHook',
-      args: [
-        amount, ARC_CCTP_DOMAIN, addressToBytes32(config.hook), usdc, hookBytes32,
-        maxFee, params.minFinalityThreshold ?? FAST_FINALITY_THRESHOLD, hookData,
-      ],
+      args: [amount, ARC_CCTP_DOMAIN, hookBytes32, src.usdc, hookBytes32, maxFee, finality, hookData],
     }),
   });
-  const receipt = await pub.waitForTransactionReceipt({ hash: burnTxHash, timeout: 60_000 });
+  const receipt = await pub.waitForTransactionReceipt({ hash: burnTxHash, timeout: 90_000 });
   if (receipt.status !== 'success') throw new Error('depositForBurnWithHook reverted');
-  return { burnTxHash };
+  return { burnTxHash, sourceChain: src };
 }
 
 /**
- * Poll Circle's Iris attestation service for a Base Sepolia burn until the message is attested.
- * Returns the raw message + attestation to relay on Arc.
+ * Poll Circle's Iris attestation service for a burn until attested. `sourceDomain` is the CCTP domain
+ * the burn originated on (the buyer's chain for inbound, 26/Arc for an outbound payout).
  */
 export async function pollAttestation(params: {
   burnTxHash: `0x${string}`;
+  sourceDomain: number;
   config?: Pick<CrossChainConfig, 'irisBase'>;
   timeoutMs?: number;
   intervalMs?: number;
   onPoll?: (status: string) => void;
 }): Promise<{ message: `0x${string}`; attestation: `0x${string}` }> {
   const base = params.config?.irisBase ?? IRIS_SANDBOX;
-  const url = `${base}/v2/messages/${BASE_SEPOLIA_CCTP_DOMAIN}?transactionHash=${params.burnTxHash}`;
-  const timeout = params.timeoutMs ?? 120_000;
+  const url = `${base}/v2/messages/${params.sourceDomain}?transactionHash=${params.burnTxHash}`;
+  const timeout = params.timeoutMs ?? 180_000;
   const interval = params.intervalMs ?? 4_000;
   const deadline = Date.now() + timeout;
 
@@ -176,7 +255,7 @@ export async function pollAttestation(params: {
 }
 
 /**
- * Relay an attested CCTP message into the Arc hook: mints the USDC to the hook and funds the escrow
+ * Relay an attested CCTP message into the Arc hook: mints the USDC to the hook + funds the escrow
  * atomically. Returns the Arc fund tx hash (explorer leg 2).
  */
 export async function mintAndFund(params: {
@@ -200,9 +279,41 @@ export async function mintAndFund(params: {
 }
 
 /**
- * End-to-end cross-chain escrow funding: burn on Base Sepolia → poll Iris → mintAndFund on Arc.
- * Returns both explorer legs and the workId. The amount the escrow ends up holding is fee-net (read
- * it from the escrow on-chain — see readEscrow).
+ * Relay the OUTBOUND payout: after the Arc escrow settles (burning USDC to the recipient's home
+ * chain), poll Iris for the Arc burn and call receiveMessage on the destination chain so the seller
+ * (or refunded buyer) actually receives the USDC. Returns the destination mint tx (final explorer leg).
+ * Permissionless — the relayer just needs gas on the destination chain.
+ */
+export async function relayOutbound(params: {
+  account: Account;
+  settleTxHash: `0x${string}`;     // the Arc settle() tx that burned the payout
+  destChain: ChainKey | string;
+  destRpcUrl?: string;
+  config?: Pick<CrossChainConfig, 'irisBase'>;
+  onPoll?: (status: string) => void;
+}): Promise<{ message: `0x${string}`; attestation: `0x${string}`; mintTxHash: `0x${string}`; destChain: ChainInfo }> {
+  const dest = chainInfo(params.destChain);
+  const { message, attestation } = await pollAttestation({
+    burnTxHash: params.settleTxHash, sourceDomain: ARC_CCTP_DOMAIN,
+    config: params.config, onPoll: params.onPoll,
+  });
+  const chain = viemChain(dest, params.destRpcUrl);
+  const transport = http(params.destRpcUrl ?? dest.rpcUrl);
+  const wallet = createWalletClient({ account: params.account, chain, transport });
+  const pub = createPublicClient({ chain, transport });
+
+  const mintTxHash = await wallet.sendTransaction({
+    to: MESSAGE_TRANSMITTER_V2,
+    data: encodeFunctionData({ abi: RECEIVE_MESSAGE_ABI, functionName: 'receiveMessage', args: [message, attestation] }),
+  });
+  const receipt = await pub.waitForTransactionReceipt({ hash: mintTxHash, timeout: 90_000 });
+  if (receipt.status !== 'success') throw new Error('receiveMessage (outbound payout) reverted');
+  return { message, attestation, mintTxHash, destChain: dest };
+}
+
+/**
+ * Inbound end-to-end: burn on the source chain → poll Iris → mintAndFund on Arc. Returns both legs.
+ * The escrow ends up holding the fee-net amount (read it from the escrow on-chain).
  */
 export async function fundCrossChainEscrow(params: {
   account: Account;
@@ -210,20 +321,22 @@ export async function fundCrossChainEscrow(params: {
   workId: `0x${string}`;
   payer: `0x${string}`;
   worker: `0x${string}`;
+  routes?: PayoutRoutes;
   config: CrossChainConfig;
   maxFeeUsdc?: number;
   minFinalityThreshold?: number;
   onStep?: (step: string) => void;
-}): Promise<{ burnTxHash: `0x${string}`; fundTxHash: `0x${string}`; workId: `0x${string}` }> {
-  params.onStep?.('burning on Base Sepolia');
+}): Promise<{ burnTxHash: `0x${string}`; fundTxHash: `0x${string}`; workId: `0x${string}`; sourceChain: ChainInfo }> {
+  const src = chainInfo(params.config.sourceChain ?? 'baseSepolia');
+  params.onStep?.(`burning on ${src.name}`);
   const { burnTxHash } = await depositForBurnWithHook(params);
   params.onStep?.(`burned ${burnTxHash}; polling Iris`);
   const { message, attestation } = await pollAttestation({
-    burnTxHash, config: params.config,
+    burnTxHash, sourceDomain: src.cctpDomain, config: params.config,
     onPoll: (s) => params.onStep?.(`iris: ${s}`),
   });
   params.onStep?.('attested; relaying to Arc hook');
   const { fundTxHash } = await mintAndFund({ account: params.account, message, attestation, config: params.config });
   params.onStep?.(`funded ${fundTxHash}`);
-  return { burnTxHash, fundTxHash, workId: params.workId };
+  return { burnTxHash, fundTxHash, workId: params.workId, sourceChain: src };
 }
