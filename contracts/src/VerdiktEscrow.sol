@@ -38,6 +38,7 @@ contract VerdiktEscrow {
 
     address public owner;
     address public verdict; // settlement orchestrator wallet (Circle DCW)
+    address public hook; // authorized cross-chain funder (EscrowFundingHook); funds CCTP-minted USDC
 
     event Funded(bytes32 indexed workId, address payer, address worker, uint256 amount);
     event Settled(
@@ -49,6 +50,7 @@ contract VerdiktEscrow {
         bytes32 evidenceHash
     );
     event VerdictUpdated(address indexed oldVerdict, address indexed newVerdict);
+    event HookSet(address indexed oldHook, address indexed newHook);
 
     modifier onlyVerdict() {
         require(msg.sender == verdict, "not verdict");
@@ -71,6 +73,46 @@ contract VerdiktEscrow {
         require(_verdict != address(0), "verdict=0");
         emit VerdictUpdated(verdict, _verdict);
         verdict = _verdict;
+    }
+
+    /// @notice Authorize the cross-chain funding hook (EscrowFundingHook). The hook receives
+    ///         CCTP-minted USDC on Arc and calls fundCrossChain. Settable by owner so the hook
+    ///         can be deployed after the escrow (it needs the escrow address at construction).
+    function setHook(address _hook) external onlyOwner {
+        emit HookSet(hook, _hook);
+        hook = _hook;
+    }
+
+    /// @notice Fund an escrow with USDC that already lives on Arc — used by the cross-chain hook
+    ///         after CCTP mints USDC to it. The hook approves this contract for `amount`, then
+    ///         calls this; we pull exactly `amount` via transferFrom. Only the authorized hook can
+    ///         call (the EIP-3009 path stays the route for native payers). The escrow params
+    ///         (workId, payer, worker, amount) come from the Iris-attested CCTP message, so the
+    ///         hook cannot fund a task the payer did not commit to.
+    /// @dev    Checks-effects-interactions: record the escrow + bump totalEscrowed BEFORE the
+    ///         external transferFrom. (USDC has no transfer callback, but CEI removes all doubt.)
+    function fundCrossChain(bytes32 workId, address payer, address worker, uint256 amount)
+        external
+    {
+        require(msg.sender == hook, "not hook");
+        require(escrows[workId].status == STATUS_EMPTY, "workId exists");
+        require(amount > 0, "amount=0");
+        require(worker != address(0), "worker=0");
+        require(payer != address(0), "payer=0");
+
+        totalEscrowed += amount;
+        escrows[workId] = Escrow({
+            payer: payer,
+            worker: worker,
+            amount: amount,
+            status: STATUS_FUNDED,
+            outcome: 0,
+            verdictCode: 0,
+            evidenceHash: bytes32(0)
+        });
+
+        require(IERC20(USDC).transferFrom(msg.sender, address(this), amount), "transferFrom failed");
+        emit Funded(workId, payer, worker, amount);
     }
 
     /// @notice Payer funds the escrow: pulls `amount` USDC from msg.sender into this
