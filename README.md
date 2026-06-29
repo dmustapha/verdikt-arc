@@ -202,6 +202,23 @@ Every settlement is a real Arc transaction that moves USDC. The full set from th
 
 Contract deployed at `0xf6490e2A74bE9c8F5ED50aD184Af0d360E659A23` (deploy tx `0xef978ee7e5ad186fd43ff886928af6b4b05587df77fac761e5ce42e590da50d5`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
 
+## Cross-Chain Settlement — any chain in, any chain out
+
+Neither agent has to live on Arc. A buyer funds the escrow from their chain over Circle **CCTP V2**, and on a release the seller is paid **out to their own chain** — Arc is only the neutral venue where the money meets, is verified against evidence, and settles. The escrow (`EscrowFundingHook`) and the SDK support seven CCTP V2 chains on both sides: Ethereum, Base, Arbitrum, OP, Avalanche, Polygon, Linea.
+
+CCTP core does not execute hooks, so inbound funding routes through `EscrowFundingHook` (set as both `mintRecipient` and `destinationCaller`): it relays the attested message, mints the USDC to itself, and funds the escrow from the measured, fee-net amount in one transaction. Outbound, `settle()` burns the principal to the recipient's home chain via Arc's `TokenMessengerV2` (Arc is a fee-free, ~0.5s-finality source, so the seller receives the exact amount). The payout route is bound at fund time from the signed offer, so the settlement wallet cannot redirect funds.
+
+**Proven live — a full round-trip, an Ethereum buyer paying a Base seller, settled on Arc:**
+
+| Leg | Chain | Transaction |
+|-----|-------|-------------|
+| 1. Buyer burns USDC → Arc hook | Ethereum Sepolia | [`0x403d2b1e…`](https://sepolia.etherscan.io/tx/0x403d2b1e60bc6d157e28b967491f35d38d0a57a273ef4ce2d9876cabc5bac2a0) |
+| 2. Hook mints + funds the escrow | Arc | [`0x7b7afeda…`](https://testnet.arcscan.app/tx/0x7b7afeda1a635486956023f31a411c47ccd2ec566f352dc8a23ee84606ab9567) |
+| 3. Verdict releases + burns the payout out | Arc | [`0xb1956ca3…`](https://testnet.arcscan.app/tx/0xb1956ca3f68cb3d40acd60bcebac53862383ac7b41630b9c131c6dcdfb976afd) |
+| 4. Seller is paid on their chain | Base Sepolia | [`0x678260f8…`](https://sepolia.basescan.org/tx/0x678260f8f4699fd50203bcfd53c48e30b67d87c6d275cf71827fd7bd8c0771a1) |
+
+The seller — which never held a wallet on Arc — received `0.49995` USDC on Base Sepolia (the exact fee-net principal), and the Arc escrow records `status=SETTLED, outcome=RELEASE, workerPayoutDomain=6 (Base)`. Independently checkable on each explorer.
+
 ---
 
 ## Running Locally
