@@ -2,11 +2,18 @@ import { Router } from 'express';
 import { insertTask } from '../lib/db.js';
 import { criteriaHash } from '../lib/task-offer.js';
 import { VERDICT_FEE_USDC } from '../lib/x402-meter.js';
+import { createRateLimiter, clientIp } from '../lib/rate-limit.js';
 import type { Task, Acceptance, ArtifactType } from '../types.js';
 
 export const tasksRouter = Router();
 
 const TYPES: ArtifactType[] = ['code', 'tool_output', 'answer'];
+
+// B3: /api/tasks is public and writes a DB row (no money moves). Rate-limit per IP so it can't be
+// spammed into DB bloat. Generous: a real payer registers a handful of tasks, not hundreds.
+const TASKS_PER_IP = Number(process.env.TASKS_PER_IP ?? 30);
+const TASKS_WINDOW_MS = Number(process.env.TASKS_WINDOW_MS ?? 10 * 60 * 1000);
+const rateLimit = createRateLimiter({ perIp: TASKS_PER_IP, ipWindowMs: TASKS_WINDOW_MS });
 
 // POST /api/tasks — a PAYER (buyer) agent registers a task's acceptance criteria + parties and gets
 // back the workId + criteriaHash needed to fund the escrow and build a signed Task Offer for an
@@ -23,6 +30,9 @@ tasksRouter.post('/api/tasks', async (req, res) => {
     seller?: `0x${string}`;
     amountUsdc?: number;
   };
+
+  const limited = rateLimit(clientIp(req), Date.now());
+  if (limited) { res.status(429).json({ error: limited }); return; }
 
   if (!workId || !/^0x[0-9a-fA-F]{64}$/.test(workId)) { res.status(400).json({ error: 'valid bytes32 workId required' }); return; }
   if (!type || !TYPES.includes(type)) { res.status(400).json({ error: `type must be one of ${TYPES.join(', ')}` }); return; }

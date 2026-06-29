@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import type { Request } from 'express';
 import { insertTask, getTask, recordFunded } from '../lib/db.js';
 import { runVerdict } from '../engine/orchestrator.js';
 import { fundEscrow } from '../settlement/fund-escrow.js';
 import { sseBus } from '../lib/sse-bus.js';
+import { createRateLimiter, clientIp } from '../lib/rate-limit.js';
 import type { Artifact, Acceptance, ArtifactType } from '../types.js';
 
 export const tryRouter = Router();
@@ -25,21 +25,7 @@ const PER_IP_WINDOW_MS = Number(process.env.TRY_IP_WINDOW_MS ?? 10 * 60 * 1000);
 const GLOBAL_DAY_LIMIT = Number(process.env.TRY_GLOBAL_DAY ?? 60);
 
 const inFlight = new Set<string>();
-const ipHits = new Map<string, number[]>();     // ip → recent run timestamps
-let dayWindowStart = 0;
-let dayCount = 0;
-
-// Returns an error string if the caller is rate-limited, else null (and records the hit).
-function rateLimit(ip: string, now: number): string | null {
-  if (now - dayWindowStart > 24 * 60 * 60 * 1000) { dayWindowStart = now; dayCount = 0; }
-  if (dayCount >= GLOBAL_DAY_LIMIT) return 'daily try-it limit reached — come back tomorrow or run it locally';
-  const recent = (ipHits.get(ip) ?? []).filter((t) => now - t < PER_IP_WINDOW_MS);
-  if (recent.length >= PER_IP_LIMIT) return `rate limit: ${PER_IP_LIMIT} runs per ${Math.round(PER_IP_WINDOW_MS / 60000)} min`;
-  recent.push(now);
-  ipHits.set(ip, recent);
-  dayCount++;
-  return null;
-}
+const rateLimit = createRateLimiter({ perIp: PER_IP_LIMIT, ipWindowMs: PER_IP_WINDOW_MS, globalPerDay: GLOBAL_DAY_LIMIT });
 
 function bytes(s: unknown): number {
   return typeof s === 'string' ? Buffer.byteLength(s, 'utf8') : 0;
@@ -92,11 +78,6 @@ export function buildTask(route: ArtifactType, body: Record<string, unknown>): {
 
 const VALID_WORKID = /^0x[0-9a-fA-F]{64}$/;
 const ROUTES: ArtifactType[] = ['code', 'tool_output', 'answer'];
-
-function clientIp(req: Request): string {
-  const fwd = req.header('x-forwarded-for');
-  return (fwd ? fwd.split(',')[0].trim() : req.ip) || 'unknown';
-}
 
 // POST /api/try  body: { workId, route, acceptance, artifact }
 tryRouter.post('/api/try', async (req, res) => {

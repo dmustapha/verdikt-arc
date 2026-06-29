@@ -216,7 +216,9 @@ class SellerApi {
     if (!params.skipVerify) await this.acceptOffer(params.offer, { expectedAcceptance: params.expectedAcceptance });
 
     const sig = await this.vk._account.signMessage!({ message: artifactMessage(offer.workId, params.artifact.payload) });
-    const body = { workId: offer.workId, artifact: { ...params.artifact, sig } };
+    // B1: bind the submission to the offer's committed criteriaHash so the worker rejects judging if
+    // the payer registered different criteria than it offered.
+    const body = { workId: offer.workId, criteriaHash: offer.criteriaHash, artifact: { ...params.artifact, sig } };
 
     // Stream the verdict steps to the caller (the same SSE the courtroom watches), if requested.
     const stopStream = params.onStep ? this.vk._streamSteps(offer.workId, params.onStep) : undefined;

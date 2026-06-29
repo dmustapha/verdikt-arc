@@ -113,8 +113,11 @@ export async function captureVerdictFee(res: Response): Promise<{ feeUsdc: numbe
   if (!auth) return { feeUsdc: 0, txHash: null };
   const cap = await captureViaGateway(auth);
   if (!cap.ok) {
-    // Never fabricate a charge; if capture fails, the caller is not billed.
-    console.error(`[x402] fee capture failed: ${cap.error}`);
+    // B2: settle-fail-after-verify. The /verify authorized the payment (so we ran the verdict), but
+    // the /settle capture failed (balance/timeout/Gateway). We DECIDE: serve the verdict free and do
+    // NOT bill — never fabricate a charge. Logged loudly + greppably so a real revenue leak is visible
+    // (a recurring SETTLE-FAIL means callers are getting verdicts without paying).
+    console.error(`[x402][SETTLE-FAIL-AFTER-VERIFY] verdict rendered but fee capture failed — serving free, NOT billed. reason=${cap.error}`);
     return { feeUsdc: 0, txHash: null };
   }
   return { feeUsdc: VERDICT_FEE_USDC, txHash: cap.txHash ?? null };
