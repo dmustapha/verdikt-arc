@@ -6,6 +6,7 @@ import type {
 } from './types.js';
 import { artifactMessage, criteriaHash, signOffer, verifyOffer } from './crypto.js';
 import { ARC_CHAIN_ID, fundEscrow, readEscrow } from './escrow.js';
+import { fundCrossChainEscrow, type CrossChainConfig } from './crosschain.js';
 import {
   AlreadyJudgedError, ArtifactSignatureError, EscrowNotFundedError, InvalidOfferError, OnboardingError, PaymentError,
 } from './errors.js';
@@ -120,6 +121,62 @@ class PayerApi {
     };
     const signature = await signOffer(this.vk._account, offer);
     return { workId, offer: { offer, signature }, escrowTx, criteriaHash: reg.criteriaHash };
+  }
+
+  /**
+   * X1: open a verified-payment job funded from ANOTHER chain (Base Sepolia) over Circle CCTP V2.
+   * Same shape as createTask, but step 2 burns USDC on the source chain → Iris attests → the Arc
+   * EscrowFundingHook mints + funds the escrow. The escrow ends up holding the FEE-NET amount (Fast
+   * Transfer deducts a small fee), so we read the on-chain amount and sign the offer with it — that
+   * keeps acceptOffer's strict amount check intact. The payer key must hold USDC + gas on Base
+   * Sepolia (faucet.circle.com). Returns both explorer legs (source burn + Arc fund).
+   */
+  async createTaskCrossChain(params: {
+    type: ArtifactType;
+    acceptance: Acceptance;
+    amountUsdc: number;
+    seller: `0x${string}`;
+    crossChain: CrossChainConfig;
+    maxFeeUsdc?: number;
+    expiresInSeconds?: number;
+    onStep?: (step: string) => void;
+  }): Promise<{
+    workId: `0x${string}`; offer: SignedTaskOffer; burnTxHash: `0x${string}`;
+    fundTxHash: `0x${string}`; criteriaHash: `0x${string}`; escrowedUsdc: number;
+  }> {
+    const payer = this.vk._account.address as `0x${string}`;
+    const workId = randomWorkId();
+
+    // 1. Register criteria (same on-ramp as createTask).
+    const res = await fetch(`${this.vk._endpoint}/api/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workId, type: params.type, acceptance: params.acceptance, payer, seller: params.seller, amountUsdc: params.amountUsdc }),
+    });
+    if (!res.ok) throw new Error(`createTaskCrossChain: /api/tasks ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const reg = (await res.json()) as { criteriaHash: `0x${string}`; escrow: `0x${string}`; chainId: number; feeUsdc: number };
+
+    const localHash = criteriaHash(params.acceptance);
+    if (reg.criteriaHash.toLowerCase() !== localHash.toLowerCase()) {
+      throw new InvalidOfferError(`server criteriaHash ${reg.criteriaHash} != local ${localHash}`);
+    }
+
+    // 2. Fund the escrow cross-chain (Base Sepolia → Arc via CCTP V2).
+    const { burnTxHash, fundTxHash } = await fundCrossChainEscrow({
+      account: this.vk._account, amountUsdc: params.amountUsdc, workId, payer, worker: params.seller,
+      config: params.crossChain, maxFeeUsdc: params.maxFeeUsdc, onStep: params.onStep,
+    });
+
+    // 3. Read the ACTUAL net-of-fee amount the escrow holds, and sign the offer with it.
+    const e = await readEscrow(reg.escrow, workId, this.vk._rpcUrl);
+    const escrowedUsdc = Number(e.amount) / 1e6;
+
+    const offer: TaskOffer = {
+      workId, type: params.type, criteriaHash: reg.criteriaHash, amountUsdc: escrowedUsdc,
+      escrow: reg.escrow, payer, seller: params.seller, chainId: reg.chainId ?? ARC_CHAIN_ID,
+      feeUsdc: reg.feeUsdc, expiresAt: Math.floor(nowMs() / 1000) + (params.expiresInSeconds ?? 3600),
+    };
+    const signature = await signOffer(this.vk._account, offer);
+    return { workId, offer: { offer, signature }, burnTxHash, fundTxHash, criteriaHash: reg.criteriaHash, escrowedUsdc };
   }
 }
 

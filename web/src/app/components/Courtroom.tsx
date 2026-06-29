@@ -5,7 +5,7 @@ import { QualityChecks } from './QualityChecks';
 import type { EvidenceItem, VerdictLabel, Outcome } from '../../types';
 import { txUrl } from '../../lib/chains';
 
-const ESCROW = '0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5';
+const ESCROW = '0x06928fF83Dd7C1A2779bf8FB35ADfaaaDaf0F278';
 
 // SSE goes direct to the Fly worker (dodges Vercel's function-duration cap on a proxied stream).
 // Falls back to the same-origin proxy if the env var is unset (e.g. local without it).

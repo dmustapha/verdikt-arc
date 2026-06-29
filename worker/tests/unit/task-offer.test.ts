@@ -22,7 +22,7 @@ function offer(over: Partial<TaskOffer> = {}): TaskOffer {
     type: 'tool_output',
     criteriaHash: criteriaHash(acceptance),
     amountUsdc: 1,
-    escrow: '0x8140FD0D07dB598fc04A284Ee5210C835a911Ae5',
+    escrow: '0x06928fF83Dd7C1A2779bf8FB35ADfaaaDaf0F278',
     payer: payer.address as `0x${string}`,
     seller: '0x665F4AF29aeeeA93cea97813f69a3ED3eAdEF8fF',
     chainId: 5042002,

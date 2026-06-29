@@ -131,4 +131,129 @@ contract VerdiktEscrowTest is Test {
         vm.expectRevert("not owner");
         escrow.sweep(address(0xBAD));
     }
+
+    // ----- X1: cross-chain funding path (fundCrossChain, called by the authorized hook) -----
+
+    address hook = address(0x40004);
+    bytes32 constant WORK_ID_2 = keccak256("work-cc");
+
+    // Authorize the hook, give it USDC + an approval to the escrow, like CCTP minting to the hook.
+    function _setupHook(uint256 amt) internal {
+        escrow.setHook(hook);
+        MockUSDC(USDC).mint(hook, amt);
+        vm.prank(hook);
+        MockUSDC(USDC).approve(address(escrow), amt);
+    }
+
+    function _fundCrossChain(uint256 amt) internal {
+        vm.prank(hook);
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, amt);
+    }
+
+    function testSetHookOnlyOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert("not owner");
+        escrow.setHook(hook);
+    }
+
+    function testSetHookStoresAddress() public {
+        escrow.setHook(hook);
+        assertEq(escrow.hook(), hook);
+    }
+
+    function testFundCrossChainHappyPath() public {
+        _setupHook(AMT);
+        _fundCrossChain(AMT);
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), AMT, "principal pulled into escrow");
+        assertEq(MockUSDC(USDC).balanceOf(hook), 0, "hook drained");
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID_2);
+        assertEq(e.payer, payer);
+        assertEq(e.worker, worker);
+        assertEq(e.amount, AMT);
+        assertEq(e.status, 1); // FUNDED
+    }
+
+    function testFundCrossChainOnlyHook() public {
+        _setupHook(AMT);
+        vm.prank(address(0xBAD));
+        vm.expectRevert("not hook");
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT);
+    }
+
+    // With no hook set, hook == address(0); no real caller can satisfy msg.sender == hook.
+    function testFundCrossChainBeforeHookSetReverts() public {
+        vm.prank(hook);
+        vm.expectRevert("not hook");
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT);
+    }
+
+    function testFundCrossChainWorkIdCollision() public {
+        _setupHook(AMT * 2);
+        _fundCrossChain(AMT);
+        vm.prank(hook);
+        vm.expectRevert("workId exists");
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT);
+    }
+
+    // A cross-chain-funded workId collides with a native EIP-3009-funded one too.
+    function testFundCrossChainCollidesWithNativeFund() public {
+        _fund(); // funds WORK_ID natively
+        escrow.setHook(hook);
+        MockUSDC(USDC).mint(hook, AMT);
+        vm.prank(hook);
+        MockUSDC(USDC).approve(address(escrow), AMT);
+        vm.prank(hook);
+        vm.expectRevert("workId exists");
+        escrow.fundCrossChain(WORK_ID, payer, worker, AMT); // same WORK_ID as _fund()
+    }
+
+    function testFundCrossChainZeroGuards() public {
+        _setupHook(AMT);
+        vm.startPrank(hook);
+        vm.expectRevert("amount=0");
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, 0);
+        vm.expectRevert("worker=0");
+        escrow.fundCrossChain(WORK_ID_2, payer, address(0), AMT);
+        vm.expectRevert("payer=0");
+        escrow.fundCrossChain(WORK_ID_2, address(0), worker, AMT);
+        vm.stopPrank();
+    }
+
+    function testFundCrossChainTotalEscrowedAndSettleRelease() public {
+        _setupHook(AMT);
+        assertEq(escrow.totalEscrowed(), 0);
+        _fundCrossChain(AMT);
+        assertEq(escrow.totalEscrowed(), AMT, "cross-chain principal tracked");
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID_2, 0, EVIDENCE); // release -> worker
+        assertEq(MockUSDC(USDC).balanceOf(worker), AMT, "worker paid");
+        assertEq(escrow.totalEscrowed(), 0, "accounting cleared");
+    }
+
+    function testFundCrossChainSettleRefund() public {
+        _setupHook(AMT);
+        _fundCrossChain(AMT);
+        uint256 before = MockUSDC(USDC).balanceOf(payer);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID_2, 1, EVIDENCE); // fail -> refund payer
+        assertEq(MockUSDC(USDC).balanceOf(payer), before + AMT);
+    }
+
+    function testFundCrossChainSettleAbstain() public {
+        _setupHook(AMT);
+        _fundCrossChain(AMT);
+        uint256 before = MockUSDC(USDC).balanceOf(payer);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID_2, 3, EVIDENCE); // abstain -> payer default
+        assertEq(MockUSDC(USDC).balanceOf(payer), before + AMT);
+    }
+
+    // sweep() must never touch cross-chain-funded principal either.
+    function testSweepIgnoresCrossChainPrincipal() public {
+        _setupHook(AMT);
+        _fundCrossChain(AMT);
+        MockUSDC(USDC).mint(address(escrow), 3_000000); // stranded
+        escrow.sweep(address(this));
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), AMT, "principal untouched");
+    }
 }
