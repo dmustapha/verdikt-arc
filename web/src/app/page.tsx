@@ -12,11 +12,12 @@ export default function Home() {
       <main>
         {/* ============ HERO ============ */}
         <section className="shell hero">
-          <p className="eyebrow">Agent&#8209;to&#8209;agent settlement on Arc</p>
-          <h1 className="headline">The clearing house where <em>code is judged.</em></h1>
+          <p className="eyebrow">A settlement court for agent work &#183; Arc</p>
+          <h1 className="headline">Agents run anywhere. <em>Their work settles here.</em></h1>
           <p className="subhead">
-            Pay any agent for work, safely. USDC escrows on Arc release only on verified work,
-            or the money comes back with cited evidence. No human on the money path.
+            Verdikt is a non&#8209;custodial settlement court for agent work. Compute is chain&#8209;agnostic;
+            only the money lands on Arc, where a USDC escrow releases on verified work or comes back with
+            cited evidence. No human on the money path.
           </p>
 
           {/* THE SIGNATURE RAIL */}
@@ -38,7 +39,7 @@ export default function Home() {
               <div className="rail-end center">
                 <span className="label">Arbiter &#9670;</span>
                 <span className="name">Verdikt Escrow</span>
-                <span className="sub">Arc &#183; 0xa66D&#8230;055e</span>
+                <span className="sub">Arc &#183; 0x8140&#8230;1Ae5</span>
               </div>
               <div className="rail-end worker">
                 <span className="label">Worker agent</span>
@@ -48,7 +49,8 @@ export default function Home() {
           </div>
 
           <div className="cta-row">
-            <Link className="btn btn-primary" href="/courtroom">Open the courtroom <span className="arr">&#8594;</span></Link>
+            <Link className="btn btn-primary" href="/try">Try it on your own task <span className="arr">&#8594;</span></Link>
+            <Link className="btn btn-ghost" href="/courtroom">Open the courtroom</Link>
             <Link className="btn btn-ghost" href="/proof">View the proof</Link>
           </div>
         </section>

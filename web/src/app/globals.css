@@ -1056,3 +1056,25 @@ a { color: inherit; text-decoration: none; }
   .lg-table tbody tr:hover td { background: var(--neutral-faint); }
   .lg-tx:hover, .lg-tx:focus-visible { color: var(--text); border-color: var(--text); }
 }
+
+/* ============ TRY IT (public bring-your-own-task rail) ============ */
+.try-boundary { max-width: 760px; margin: 18px 0 26px; color: var(--text-dim); font-size: 15px; line-height: 1.65; }
+.try-boundary em { color: var(--text); font-style: italic; }
+.try-boundary strong { color: var(--emerald); font-weight: 600; }
+.try-routes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
+@media (max-width: 640px) { .try-routes { grid-template-columns: 1fr; } }
+.try-routes .case { gap: 8px; min-height: auto; }
+.try-verifies { max-width: 820px; margin: 0 0 26px; color: var(--text-faint); font-size: 13.5px; line-height: 1.6; padding-left: 14px; border-left: 2px solid var(--hair-strong); }
+.try-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 22px; }
+@media (max-width: 820px) { .try-grid { grid-template-columns: 1fr; } }
+.try-field { display: flex; flex-direction: column; gap: 6px; }
+.tf-label { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+.tf-hint { font-size: 12px; color: var(--text-faint); min-height: 16px; }
+.tf-hint select { background: var(--surface); color: var(--text); border: 1px solid var(--hair-strong); border-radius: var(--radius-sm); padding: 1px 6px; font-family: var(--mono); font-size: 11px; }
+.try-field textarea {
+  width: 100%; resize: vertical; background: var(--surface-1); color: var(--text);
+  border: 1px solid var(--hair); border-radius: var(--radius-md); padding: 14px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; tab-size: 4;
+}
+.try-field textarea:focus-visible { outline: none; border-color: var(--emerald-line); box-shadow: 0 0 0 3px var(--emerald-soft); }
+.try-field textarea:disabled { opacity: 0.6; cursor: not-allowed; }
