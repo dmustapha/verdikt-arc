@@ -2,6 +2,7 @@ import type { Task, Artifact, VerdictResult, EvidenceBundle } from '../types.js'
 import { runCodeRoute } from './code-route.js';
 import { runSchemaRoute } from './schema-route.js';
 import { runGroundingRoute } from './grounding-route.js';
+import { runGroundingV2 } from './grounding-nli.js';
 import { reasonOverEvidence } from './reasoner.js';
 import { settleVerdict, outcomeFor } from '../settlement/settle.js';
 import { buildReceipt } from '../lib/receipt.js';
@@ -19,7 +20,11 @@ async function routeArtifact(task: Task, artifact: Artifact): Promise<EvidenceBu
   switch (task.type) {
     case 'code': return runCodeRoute(task.acceptance, artifact);
     case 'tool_output': return runSchemaRoute(task.acceptance, artifact);
-    case 'answer': return runGroundingRoute(task.acceptance, artifact);
+    // F1: claim-decomposition + per-claim entailment gate when enabled; the lexical gate is the
+    // safe default so the live behavior is unchanged unless GROUNDING_V2 is turned on.
+    case 'answer': return process.env.GROUNDING_V2 === 'true'
+      ? runGroundingV2(task.acceptance, artifact)
+      : runGroundingRoute(task.acceptance, artifact);
   }
 }
 

@@ -13,6 +13,8 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@circle-fin/developer-controlled-wallets": "^7.0.0",
     "@vercel/postgres": "^0.10.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "express": "^4.19.2",
     "viem": "^2.21.0"
   },

@@ -16,12 +16,15 @@ export interface SchemaField {
   enum?: string[];
   min?: number;
   max?: number;
+  format?: string;                           // E1: ajv-formats (email, uri, date-time, uuid, ...)
+  pattern?: string;                          // E1: regex the string value must match
 }
 
 export interface Acceptance {
   spec: string;                              // human description of "good"
   tests?: string;                            // code route: payer pytest file contents
-  schema?: Record<string, SchemaField>;      // tool_output route: payer JSON schema
+  schema?: Record<string, SchemaField>;      // tool_output route: payer field map (simple form)
+  jsonSchema?: Record<string, unknown>;      // tool_output route: full JSON Schema draft 2020-12 (E1)
   minResponseBytes?: number;                 // tool_output route
   sources?: string;                          // answer route: payer source text
 }

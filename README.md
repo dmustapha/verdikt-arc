@@ -6,7 +6,7 @@ Verdikt is settlement infrastructure that sits between two agents that have neve
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 [![Foundry](https://img.shields.io/badge/Foundry-Solidity-orange)](https://book.getfoundry.sh/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-121_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-148_passing-brightgreen)]()
 
 **Live:** [verdikt-arc.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)
 
@@ -77,7 +77,7 @@ The reasoner is a language model, so it can be wrong. The floor is not. Any fail
 A model can give you an opinion. It cannot give you an opinion that nobody, including the model's operator, can quietly change after the fact. Verdikt anchors `keccak256(evidence)` in the on-chain `Settled` event, so anyone can later recompute the evidence hash from the bundle and prove the verdict was not altered after settlement. The `/proof` page does this live: the on-chain anchor, the database mirror, and a hash recomputed in the browser from the stored bundle are shown side by side and are identical. Escrow that refunds on failure and a tamper-evident, independently recomputable verdict record are things an LLM fundamentally cannot offer.
 
 ### What you trust, and what you don't
-Verdikt is **non-custodial infrastructure** that sits between two independent agents — it never holds their money. The buyer's USDC goes into the `VerdiktEscrow` contract (not a Verdikt account) and is released by contract code to the seller (release) or back to the buyer (refund/abstain); Verdikt cannot divert it. The only money Verdikt earns is the per-verdict fee, and only on a rendered verdict. Verdikt is escrowed, evidence-anchored, and settled with no human in the loop. It is not "trustless AI verification," and we do not claim that. What the chain guarantees: non-custodial escrow, single-shot settlement, an outcome derived on-chain from the verdict code, and an immutable evidence anchor. What you still trust: the Circle settlement wallet to submit the verdict it computed, and the worker to submit the artifact it actually produced (bound by a worker signature on the public API). The deterministic floor removes trust in the model on the block side; the chain removes trust in the operator on the record side.
+Verdikt is **non-custodial infrastructure** that sits between two independent agents: it never holds their money. The buyer's USDC goes into the `VerdiktEscrow` contract (not a Verdikt account) and is released by contract code to the seller (release) or back to the buyer (refund/abstain); Verdikt cannot divert it. The only money Verdikt earns is the per-verdict fee, and only on a rendered verdict. Verdikt is escrowed, evidence-anchored, and settled with no human in the loop. It is not "trustless AI verification," and we do not claim that. What the chain guarantees: non-custodial escrow, single-shot settlement, an outcome derived on-chain from the verdict code, and an immutable evidence anchor. What you still trust: the Circle settlement wallet to submit the verdict it computed, and the worker to submit the artifact it actually produced (bound by a worker signature on the public API). The deterministic floor removes trust in the model on the block side; the chain removes trust in the operator on the record side.
 
 ---
 
@@ -87,7 +87,7 @@ Verdikt is **non-custodial infrastructure** that sits between two independent ag
 
 **Settlement (Circle Developer-Controlled Wallets).** The verdict wallet signs the on-chain `settle()` through Circle DCW. No human is on the money path: the arbiter decides and Circle executes. The on-chain outcome is derived from the verdict code inside the contract, so the settlement wallet cannot pay out an outcome that contradicts the recorded verdict.
 
-**Metering (x402 + Gateway), auth-and-capture.** The public verdict API is genuinely metered: a call without a valid `Payment-Signature` returns HTTP 402. The sub-cent USDC fee (`$0.001`) is **authorized** up front through Circle Gateway (so we never run a verdict for a non-payer) but **captured only when we actually render a verdict** — `release` or `refund`. On `abstain` (we could not verify the work) the authorization is voided and **the seller pays nothing**: if we can't verify, we don't take their money. The `/proof` page surfaces the live counter as the summed total of real *captured* fees (not a count multiplied by an assumed price); self-serve demo runs are unmetered and excluded, so every fee shown is a genuine third-party paid verdict.
+**Metering (x402 + Gateway), auth-and-capture.** The public verdict API is genuinely metered: a call without a valid `Payment-Signature` returns HTTP 402. The sub-cent USDC fee (`$0.001`) is **authorized** up front through Circle Gateway (so we never run a verdict for a non-payer) but **captured only when we actually render a verdict** (`release` or `refund`). On `abstain` (we could not verify the work) the authorization is voided and **the seller pays nothing**: if we can't verify, we don't take their money. The `/proof` page surfaces the live counter as the summed total of real *captured* fees (not a count multiplied by an assumed price); self-serve demo runs are unmetered and excluded, so every fee shown is a genuine third-party paid verdict.
 
 ```ts
 // worker/src/routes/verdict.ts: 402 unless the Gateway fee is paid, then bind + lock
@@ -122,7 +122,7 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
 
 ```bash
 # Worker (verdict engine + real Docker sandbox)
-cd worker && npm test          # 78/78 passing
+cd worker && npm test          # 105/105 passing
 
 # Contracts (escrow invariants, access control, reentrancy, front-run, sweep)
 cd contracts && forge test     # 34/34 passing
@@ -145,6 +145,20 @@ WORKER_GATEWAY_KEY=… tsx scripts/gateway-buyer.ts deposit 0.05
 ```
 
 This exact path was exercised end to end against the live worker: deposit → 402 → Gateway settle → worker-signature check → single-shot judge → on-chain settle, with the fee recorded in the `/proof` counter.
+
+---
+
+## Agent integration (SDK + MCP)
+Two independent agents coordinate through a payer-signed **Task Offer** (no shared backend): the payer registers criteria + funds the escrow and signs the offer; the seller verifies the offer and that the escrow is funded on-chain before working.
+
+- **`@verdikt/sdk`** (`sdk/`): one call per role. `payer.createTask()` (register + fund + sign offer) and `seller.submit()` (verify + sign artifact + pay x402 + await verdict). Pluggable signer, typed results (`released`/`refunded`/`abstained`) and errors. Proven live end-to-end (release + abstain).
+- **`@verdikt/mcp`** (`mcp/`): an MCP server exposing `create_task` / `submit_artifact` / `check_escrow`, so MCP-capable agents (Claude, LangGraph, CrewAI, Vercel AI SDK) call Verdikt natively.
+
+## Verification depth (optional flags)
+The deterministic floor and the three routes ship with stronger, evidence-grounded checks that are env-gated so the default behavior stays fast and stable:
+- **Mutation testing** (`MUTATION_TEST=true`): grades the payer's test suite by mutating the delivered code; a suite that can't catch mutations is too weak to certify, so the verdict **abstains** rather than release on hollow passes.
+- **Full JSON Schema**: the tool-output route validates against a complete JSON Schema (draft 2020-12) with `format` assertion, or the simple field map with `format`/`pattern`.
+- **Claim-decomposition grounding** (`GROUNDING_V2=true`): the answer route decomposes into atomic claims and requires each to be entailed by, and verbatim-locatable in, the payer's sources; any contradiction fails, anything unverifiable abstains.
 
 ---
 

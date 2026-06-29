@@ -14,6 +14,10 @@ RUN mkdir -p /rules \
 COPY runner.sh /runner.sh
 RUN chmod +x /runner.sh
 
+# D1: bounded mutation tester (grades the payer's test suite). Invoked via an entrypoint override.
+COPY mutate.py /mutate.py
+RUN chmod +x /mutate.py
+
 # Non-root for defense-in-depth; the host adds --network=none + resource caps.
 RUN useradd -m runner
 USER runner
