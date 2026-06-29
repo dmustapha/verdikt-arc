@@ -137,8 +137,53 @@ export async function runCodeRoute(acceptance: Acceptance, artifact: Artifact): 
       });
     }
 
+    // D1: mutation-test the payer's suite (env-gated; OFF by default to protect demo latency). Only
+    // meaningful when the base tests pass and there are no static fails — i.e. a release is on the
+    // table purely on "tests pass". A weak suite (low mutation score) means that signal is hollow,
+    // so we ABSTAIN (set routeError → refund-to-payer) rather than certify on tests that test nothing.
+    if (process.env.MUTATION_TEST === 'true') {
+      const testsPass = items.some((i) => i.kind === 'test') && items.every((i) => i.kind !== 'test' || i.status === 'pass');
+      const noStaticFail = !items.some((i) => i.kind === 'static' && i.status === 'fail');
+      if (testsPass && noStaticFail) {
+        const mut = await runMutationPass(dir);
+        if (mut && typeof mut.score === 'number') {
+          const min = Number(process.env.MUTATION_MIN_SCORE ?? '0.5');
+          const weak = mut.score < min;
+          items.push({
+            id: 'mutation:score', kind: 'test', label: 'test-suite mutation score',
+            status: weak ? 'info' : 'pass',
+            detail: `mutation score ${mut.score} (killed ${mut.killed}/${mut.total}; min ${min})`,
+          });
+          if (weak) return { route: 'code', items, routeError: `payer test suite too weak to certify (mutation score ${mut.score} < ${min})` };
+        }
+      }
+    }
+
     return { route: 'code', items };
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// Run the bounded mutation tester in the sandbox (entrypoint override → python3 /mutate.py over the
+// same read-only /work mount). Returns the parsed score object, or null on skip/error (advisory).
+async function runMutationPass(dir: string): Promise<{ score: number; killed: number; total: number } | null> {
+  let out: string;
+  try {
+    out = await runDocker(
+      ['run', '--rm', '--network=none', '--memory=512m', '--cpus=1', '--pids-limit=128',
+       '--cap-drop=ALL', '--security-opt=no-new-privileges', '--entrypoint', 'python3',
+       '-v', `${dir}:/work:ro`, RUNNER_IMAGE, '/mutate.py'],
+      60_000, 1024 * 1024,
+    );
+  } catch {
+    return null; // mutation is advisory; never block a verdict on its failure
+  }
+  try {
+    const j = JSON.parse(out.trim()) as { score?: number; killed?: number; total?: number; skip?: string };
+    if (j.skip || typeof j.score !== 'number') return null;
+    return { score: j.score, killed: j.killed ?? 0, total: j.total ?? 0 };
+  } catch {
+    return null;
   }
 }
