@@ -2,7 +2,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { Account } from 'viem';
 import { GatewayClient } from '@circle-fin/x402-batching/client';
 import type {
-  Acceptance, Artifact, ArtifactType, SignedTaskOffer, TaskOffer, VerdictResult, VerdiktConfig,
+  Acceptance, Artifact, ArtifactType, SignedTaskOffer, TaskOffer, VerdictResult, VerdictStep, VerdiktConfig,
 } from './types.js';
 import { artifactMessage, criteriaHash, signOffer, verifyOffer } from './crypto.js';
 import { ARC_CHAIN_ID, fundEscrow, readEscrow } from './escrow.js';
@@ -42,6 +42,37 @@ export class Verdikt {
   /** @internal */ get _endpoint() { return this.config.endpoint.replace(/\/$/, ''); }
   /** @internal */ get _rpcUrl() { return this.config.rpcUrl; }
   /** @internal */ get _gateway() { return this.gateway; }
+
+  /**
+   * @internal Subscribe to the worker's SSE step stream for a workId and forward each step to `onStep`.
+   * Portable (fetch + stream reader, no EventSource dependency). Best-effort: network/parse errors are
+   * swallowed since steps are for legibility, not correctness. Returns a stop function.
+   */
+  _streamSteps(workId: string, onStep: (s: VerdictStep) => void): () => void {
+    const ctrl = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(`${this._endpoint}/api/stream/${workId}`, { signal: ctrl.signal, headers: { accept: 'text/event-stream' } });
+        if (!res.body) return;
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line.startsWith('data:')) continue;
+            try { onStep(JSON.parse(line.slice(5).trim()) as VerdictStep); } catch { /* skip partial */ }
+          }
+        }
+      } catch { /* aborted or transient — steps are best-effort */ }
+    })();
+    return () => ctrl.abort();
+  }
 }
 
 class PayerApi {
@@ -179,12 +210,16 @@ class SellerApi {
    */
   async submit(params: {
     offer: SignedTaskOffer; artifact: Artifact; expectedAcceptance?: Acceptance; skipVerify?: boolean;
+    onStep?: (step: VerdictStep) => void;
   }): Promise<VerdictResult> {
     const { offer } = params.offer;
     if (!params.skipVerify) await this.acceptOffer(params.offer, { expectedAcceptance: params.expectedAcceptance });
 
     const sig = await this.vk._account.signMessage!({ message: artifactMessage(offer.workId, params.artifact.payload) });
     const body = { workId: offer.workId, artifact: { ...params.artifact, sig } };
+
+    // Stream the verdict steps to the caller (the same SSE the courtroom watches), if requested.
+    const stopStream = params.onStep ? this.vk._streamSteps(offer.workId, params.onStep) : undefined;
 
     let data: { workId: `0x${string}`; verdict: string; outcome: string; txHash: string | null; feeUsdc?: number };
     try {
@@ -195,6 +230,9 @@ class SellerApi {
       if (msg.includes('does not match the task worker') || msg.includes('seller')) throw new ArtifactSignatureError();
       if (msg.includes('not authorized') || msg.includes('not paid') || msg.includes('balance') || msg.includes('402')) throw new PaymentError(msg.slice(0, 160));
       throw err;
+    } finally {
+      // Give the reader a beat to flush the terminal 'settled' step, then stop.
+      if (stopStream) setTimeout(stopStream, 1200);
     }
 
     const outcome = data.outcome as VerdictResult['outcome'];

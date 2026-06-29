@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactType, SignedTaskOffer, VerdictResult } from '@verdikt/sdk';
+import type { Artifact, ArtifactType, SignedTaskOffer, VerdictResult, VerdictStep } from '@verdikt/sdk';
 import { Agent } from './agent.js';
 import type { ToolSpec } from './brain.js';
 
@@ -38,8 +38,9 @@ export class SellerAgent extends Agent {
   /** Ensure the seller can pay verdict fees from its Gateway balance (idempotent). */
   async onboard() { return this.vk.seller.ensureOnboarded({ minUsdc: 0.002, depositUsdc: 0.02 }); }
 
-  /** Generate the deliverable with the LLM, then submit it for a verdict. */
-  async fulfill(offer: SignedTaskOffer, route: ArtifactType, sellerBrief: string, style: SellerStyle = 'diligent'): Promise<{ delivery: Delivery; result: VerdictResult }> {
+  /** Generate the deliverable with the LLM, then submit it for a verdict. `onStep` narrates the live
+   *  verdict steps (the same SSE the courtroom watches). */
+  async fulfill(offer: SignedTaskOffer, route: ArtifactType, sellerBrief: string, style: SellerStyle = 'diligent', onStep?: (s: VerdictStep) => void): Promise<{ delivery: Delivery; result: VerdictResult }> {
     const delivery = await this.brain.decide<Delivery>(
       STYLE_SYSTEM[style],
       `Route: ${route}\nBrief: ${sellerBrief}\n\nProduce the deliverable now.`,
@@ -49,7 +50,7 @@ export class SellerAgent extends Agent {
       ? { type: 'code', language: delivery.language ?? 'python', payload: delivery.payload }
       : { type: route, payload: delivery.payload };
     // Independent seller: verify the offer + escrow on-chain, sign the artifact, pay x402, await verdict.
-    const result = await this.vk.seller.submit({ offer, artifact });
+    const result = await this.vk.seller.submit({ offer, artifact, onStep });
     return { delivery, result };
   }
 }

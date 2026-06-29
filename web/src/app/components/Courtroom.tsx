@@ -53,7 +53,7 @@ const SETTLE_SUB: Record<Outcome, string> = {
   abstain: 'Work could not be judged · USDC returned to payer',
 };
 
-export function Courtroom() {
+export function Courtroom({ watchWorkId }: { watchWorkId?: string } = {}) {
   const [items, setItems] = useState<EvidenceItem[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [verdict, setVerdict] = useState<VerdictLabel | null>(null);
@@ -88,21 +88,21 @@ export function Courtroom() {
     esRef.current?.close();
   }
 
-  async function run(type: DemoType) {
+  function begin(): boolean {
     // Double-submit guard: a fast second click before React re-renders the disabled
     // buttons would otherwise fire a second POST + stream. The ref flips synchronously.
-    if (runningRef.current) return;
+    if (runningRef.current) return false;
     runningRef.current = true;
     setItems([]); setSteps([]); setVerdict(null); setOutcome(undefined); setTxHash(null);
     setStatus('connecting…'); setRunning(true);
     sawStaticFail.current = false;
+    return true;
+  }
 
-    // The client owns the workId and opens the SSE FIRST. Only once the stream is connected do we
-    // POST to start the run — so the fund→route→evidence→verdict→settle steps arrive LIVE instead
-    // of a ~25s dead spinner followed by an instant history dump.
-    const workId = randomWorkId();
-    push({ key: 'fund', text: `Payer agent escrowing 1 USDC on Arc · workId ${workId.slice(0, 10)}…`, tone: 'neutral' });
-
+  // Open the SSE for a workId, arm the watchdog, and run `onOpen` once connected (a demo POST, or
+  // nothing in watch mode). The client opens the stream FIRST so steps arrive live; the bus also
+  // replays history, so opening AFTER an agent run still shows the full run.
+  function openStream(workId: `0x${string}`, onOpen?: () => Promise<void>) {
     esRef.current?.close();
     const es = new EventSource(`${WORKER_BASE}/api/stream/${workId}`);
     esRef.current = es;
@@ -111,25 +111,12 @@ export function Courtroom() {
     // 90s watchdog: if no terminal event lands (worker hung/unreachable), surface a clean failure
     // instead of a forever-spinner on camera.
     watchdogRef.current = setTimeout(() => {
-      if (streamLive.current) { setStatus('timed out — retry the run'); stop(); }
+      if (streamLive.current) { setStatus('timed out — retry'); stop(); }
     }, 90000);
 
-    // Start the run only after the stream is open (so no early events are missed; the bus also
-    // replays history as a safety net).
     es.onopen = async () => {
-      try {
-        const res = await fetch(`/api/demo/${type}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workId }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          setStatus(`error: ${body.error ?? 'failed to start run'}`); stop();
-        } else {
-          setStatus('running…');
-        }
-      } catch (e) {
-        setStatus(`error: ${e instanceof Error ? e.message : String(e)}`); stop();
-      }
+      try { if (onOpen) await onOpen(); setStatus('running…'); }
+      catch (e) { setStatus(`error: ${e instanceof Error ? e.message : String(e)}`); stop(); }
     };
 
     es.onmessage = (e) => {
@@ -211,9 +198,36 @@ export function Courtroom() {
       // close after the stream ends. streamLive is true only while we still expect
       // events, so this surfaces a genuine interruption instead of spinning forever
       // (and avoids the stale `running` closure that made this branch never fire).
-      if (streamLive.current) { setStatus('stream interrupted — retry the run'); stop(); }
+      if (streamLive.current) { setStatus('stream interrupted — retry'); stop(); }
     };
   }
+
+  // Live demo run: client owns the workId, opens the stream, then POSTs to start the run.
+  async function run(type: DemoType) {
+    if (!begin()) return;
+    const workId = randomWorkId();
+    push({ key: 'fund', text: `Payer agent escrowing 1 USDC on Arc · workId ${workId.slice(0, 10)}…`, tone: 'neutral' });
+    openStream(workId, async () => {
+      const res = await fetch(`/api/demo/${type}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workId }),
+      });
+      if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error ?? 'failed to start run'); }
+    });
+  }
+
+  // Read-only watch of an externally-created (agent) run: subscribe to its workId, no POST. The bus
+  // replays history, so the full run renders even if the page opens after the agents finished.
+  function watch(workId: `0x${string}`) {
+    if (!begin()) return;
+    push({ key: 'watch', text: `Watching an agent run · workId ${workId.slice(0, 10)}…`, tone: 'neutral' });
+    openStream(workId);
+  }
+
+  // Auto-subscribe when opened as /courtroom?workId=0x… (an agent run handed off from the SDK).
+  useEffect(() => {
+    if (watchWorkId && /^0x[0-9a-fA-F]{64}$/.test(watchWorkId)) watch(watchWorkId as `0x${string}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchWorkId]);
 
   const buttons: { type: DemoType; label: string; primary?: boolean }[] = [
     { type: 'bad', label: 'Run bad (SQLi) → refund', primary: true },

@@ -6,6 +6,7 @@ import { SellerAgent, type SellerStyle } from './seller-agent.js';
 // engine settles. Nothing here is a fixture — the criteria AND the deliverable are LLM-generated.
 
 const ENDPOINT = process.env.WORKER_URL ?? 'https://verdikt-worker.fly.dev';
+const WEB = process.env.WEB_URL ?? 'https://verdikt-arc-damilolas-projects-fafdf859.vercel.app';
 const RPC = process.env.ARC_RPC_URL;
 const EXPLORER = 'https://testnet.arcscan.app/tx/';
 const AMOUNT = Number(process.env.AGENTS_AMOUNT_USDC ?? 0.1);
@@ -57,9 +58,19 @@ async function runScenario(payer: PayerAgent, seller: SellerAgent, s: Scenario, 
   line(`    route=${c.route}  workId=${c.workId.slice(0, 12)}…  escrow funded: ${link(c.escrowTx)}`);
   line(`    seller brief: ${c.sellerBrief.replace(/\s+/g, ' ').slice(0, 140)}…`);
 
+  // Watch this exact run live in the UI (the courtroom subscribes read-only to the agent's workId).
+  line(`    watch live: ${WEB}/courtroom?workId=${c.workId}`);
+
   const briefForSeller = s.sellerBrief ?? c.sellerBrief;
   line(`  · seller agent (${s.style}) generating the deliverable + submitting…`);
-  const { delivery, result } = await seller.fulfill(c.offer, c.route, briefForSeller, s.style);
+  const seen = new Set<string>();
+  const onStep = (st: { type: string; data: Record<string, unknown> }) => {
+    if (st.type === 'route_selected') line(`      ⟶ arbiter route: ${st.data.route}`);
+    else if (st.type === 'evidence_item') { const d = st.data as { label?: string; status?: string }; line(`      ⟶ evidence: ${d.label} → ${String(d.status).toUpperCase()}`); }
+    else if (st.type === 'verdict' && !seen.has('v')) { seen.add('v'); line(`      ⟶ verdict: ${String(st.data.verdict).toUpperCase()}`); }
+    else if (st.type === 'settled' && !seen.has('s')) { seen.add('s'); line(`      ⟶ settled: ${st.data.outcome}`); }
+  };
+  const { delivery, result } = await seller.fulfill(c.offer, c.route, briefForSeller, s.style, onStep);
   if (delivery.note) line(`    seller note: ${delivery.note.replace(/\s+/g, ' ').slice(0, 120)}`);
   line(`    deliverable (head): ${delivery.payload.replace(/\n/g, ' ⏎ ').slice(0, 120)}…`);
 
