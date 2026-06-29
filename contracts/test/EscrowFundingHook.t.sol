@@ -43,9 +43,19 @@ contract EscrowFundingHookTest is Test {
         pure
         returns (bytes memory)
     {
+        // Default to LOCAL payout routes (Arc); see _messageRouted for cross-chain.
+        return _messageRouted(workId, p, w, salt, 0, bytes32(0), 0, bytes32(0));
+    }
+
+    function _messageRouted(
+        bytes32 workId, address p, address w, bytes1 salt,
+        uint32 wDom, bytes32 wRcpt, uint32 pDom, bytes32 pRcpt
+    ) internal pure returns (bytes memory) {
         bytes memory prefix = new bytes(376);
         prefix[0] = salt;
-        return bytes.concat(prefix, abi.encode(workId, p, w));
+        // hookData v2 = abi.encode(workId, payer, worker, workerDomain, workerRecipient,
+        // payerDomain, payerRecipient) = 224 bytes.
+        return bytes.concat(prefix, abi.encode(workId, p, w, wDom, wRcpt, pDom, pRcpt));
     }
 
     function testMintAndFundHappyPath() public {
@@ -119,9 +129,19 @@ contract EscrowFundingHookTest is Test {
 
     function testMintAndFundLengthGuard() public {
         transmitter.setMint(AMT);
-        bytes memory short = new bytes(471); // one byte below 376 + 96
+        bytes memory short = new bytes(599); // one byte below 376 + 224
         vm.expectRevert("message too short");
         hook.mintAndFund(short, "");
+    }
+
+    // hookData v2 carries cross-chain payout routes through to the escrow.
+    function testMintAndFundDecodesPayoutRoutes() public {
+        bytes32 sellerOnBase = bytes32(uint256(uint160(address(0xBA5E))));
+        transmitter.setMint(AMT);
+        hook.mintAndFund(_messageRouted(WORK_ID, payer, worker, 0x01, 6, sellerOnBase, 0, bytes32(0)), "");
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.workerPayoutDomain, 6);
+        assertEq(e.workerPayoutRecipient, sellerOnBase);
     }
 
     function testMintAndFundNothingMintedReverts() public {

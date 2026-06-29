@@ -56,7 +56,7 @@ contract FrontrunResistanceTest is Test {
     // The escrow (msg.sender == to) CAN redeem the authorization and records the escrow atomically.
     function testEscrowCanFundViaReceiveAuth() public {
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG);
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
         assertEq(ReceiveEnforcingUSDC(USDC).balanceOf(address(escrow)), AMT);
         assertEq(escrow.getEscrow(WORK_ID).status, 1); // FUNDED
         assertEq(escrow.totalEscrowed(), AMT);
@@ -77,7 +77,7 @@ contract FrontrunResistanceTest is Test {
         // stranded in the escrow without a record.
         assertEq(ReceiveEnforcingUSDC(USDC).balanceOf(address(escrow)), 0, "nothing stranded");
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG);
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
         assertEq(escrow.getEscrow(WORK_ID).status, 1, "fund still works after a failed front-run");
     }
 }

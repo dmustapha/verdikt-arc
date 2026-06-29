@@ -6,7 +6,7 @@ import type {
 } from './types.js';
 import { artifactMessage, criteriaHash, signOffer, verifyOffer } from './crypto.js';
 import { ARC_CHAIN_ID, fundEscrow, readEscrow } from './escrow.js';
-import { fundCrossChainEscrow, type CrossChainConfig } from './crosschain.js';
+import { fundCrossChainEscrow, type CrossChainConfig, type PayoutRoute, type PayoutRoutes } from './crosschain.js';
 import {
   AlreadyJudgedError, ArtifactSignatureError, EscrowNotFundedError, InvalidOfferError, OnboardingError, PaymentError,
 } from './errors.js';
@@ -137,6 +137,10 @@ class PayerApi {
     amountUsdc: number;
     seller: `0x${string}`;
     crossChain: CrossChainConfig;
+    /** Where the seller is paid OUT on a release (their home chain). Omit = paid on Arc. */
+    sellerPayout?: PayoutRoute;
+    /** Where the buyer is refunded on a refund/abstain (their home chain). Omit = refunded on Arc. */
+    payerRefund?: PayoutRoute;
     maxFeeUsdc?: number;
     expiresInSeconds?: number;
     onStep?: (step: string) => void;
@@ -160,10 +164,12 @@ class PayerApi {
       throw new InvalidOfferError(`server criteriaHash ${reg.criteriaHash} != local ${localHash}`);
     }
 
-    // 2. Fund the escrow cross-chain (Base Sepolia → Arc via CCTP V2).
+    // 2. Fund the escrow cross-chain (source chain → Arc via CCTP V2), carrying the payout routes so
+    //    the seller/buyer can be paid OUT to their home chains on settlement.
+    const routes: PayoutRoutes = { worker: params.sellerPayout, payer: params.payerRefund };
     const { burnTxHash, fundTxHash } = await fundCrossChainEscrow({
       account: this.vk._account, amountUsdc: params.amountUsdc, workId, payer, worker: params.seller,
-      config: params.crossChain, maxFeeUsdc: params.maxFeeUsdc, onStep: params.onStep,
+      routes, config: params.crossChain, maxFeeUsdc: params.maxFeeUsdc, onStep: params.onStep,
     });
 
     // 3. Read the ACTUAL net-of-fee amount the escrow holds, and sign the offer with it.
