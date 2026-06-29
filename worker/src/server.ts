@@ -4,8 +4,12 @@ import { verdictRouter } from './routes/verdict.js';
 import { streamRouter } from './routes/stream.js';
 import { demoRouter } from './routes/demo.js';
 import { tasksRouter } from './routes/tasks.js';
+import { tryRouter } from './routes/try.js';
 
 const app = express();
+// Behind Fly's proxy: trust the first hop so req.ip / X-Forwarded-For reflect the real client
+// (the public /api/try rail rate-limits per IP).
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 // Restrict money-moving routes to the known web origin. The SSE stream route (read-only)
 // sets its own `*` header. WEB_ORIGIN unset falls back to `*` for local dev only.
@@ -20,6 +24,7 @@ app.use(verdictRouter);
 app.use(streamRouter);
 app.use(demoRouter);
 app.use(tasksRouter);
+app.use(tryRouter);
 
 // JSON error handler. Replaces Express's default HTML error page (which leaks
 // absolute file paths and a stack trace in the body). Malformed JSON bodies from

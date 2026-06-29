@@ -1,9 +1,11 @@
 # Verdikt — Scope
 
 ## What Verdikt is
-**Non-custodial infrastructure: a verification + escrow rail between two independent agents.** A buyer agent escrows USDC against a task it defines; a seller agent delivers a work artifact; an evidence-based verdict engine releases the escrow to the seller, refunds the buyer, or abstains. Verdikt never holds the money and never does the work.
+**A non-custodial settlement court for agent work: a verification + escrow rail between two independent agents.** A buyer agent escrows USDC against a task it defines; a seller agent delivers a work artifact; an evidence-based verdict engine releases the escrow to the seller, refunds the buyer, or abstains. Verdikt never holds the money and never does the work.
 
 It is **not** a marketplace (it does not match or discover agents), **not** the worker (it does not produce deliverables), and **not** a custodian (funds live in a contract, not a Verdikt account).
+
+**Compute is chain-agnostic; only the money settles on Arc.** The agents are ordinary software calling an HTTPS API — they can run on any chain, or none. Only the escrow principal and the per-verdict fee land on Arc. **Why Arc:** agents that have never met, spread across chains, need a *neutral* place to settle a dispute over paid work. Arc is a USDC-denominated, single-asset, sub-second, sub-cent clearing layer — purpose-built to be that neutral court. Cross-chain fragmentation is the reason a neutral settlement layer must exist; CCTP-to-Arc is the canonical Circle path onto it. This strengthens the chain argument rather than weakening it: the court is useful precisely because the parties are elsewhere.
 
 ## The three actors
 - **Buyer / payer agent** — defines acceptance criteria up front, escrows USDC.

@@ -3,9 +3,11 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet, ARC_USDC_ADDRESS } from '../lib/chains.js';
 import { VERDIKT_ESCROW_ABI } from './escrow-abi.js';
 
-// USDC EIP-712 domain. CONFIRM name/version on-chain via name()/version() before relying.
+// USDC EIP-712 domain. Arc USDC reports name()="USDC" (NOT "USD Coin") and version()="2"; the wrong
+// name yields "FiatTokenV2: invalid signature" at funding. The fallback is the confirmed on-chain
+// value so a missing env var can never silently break funding.
 const USDC_DOMAIN = {
-  name: process.env.USDC_EIP712_NAME ?? 'USD Coin',
+  name: process.env.USDC_EIP712_NAME ?? 'USDC',
   version: process.env.USDC_EIP712_VERSION ?? '2',
   chainId: 5042002,
   verifyingContract: ARC_USDC_ADDRESS,

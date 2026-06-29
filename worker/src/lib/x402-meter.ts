@@ -9,17 +9,46 @@ const VERDICT_FEE_USDC = parseFloat(process.env.VERDICT_FEE_USDC ?? '0.001'); //
 function build402(req: Request, res: Response) {
   const payTo = process.env.VERDICT_FEE_WALLET_ADDRESS!;
   const amountUnits = Math.round(VERDICT_FEE_USDC * 1_000_000).toFixed(0);
-  const paymentRequired = {
+  const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
+  // The PAYMENT-REQUIRED header is the PROVEN Circle Gateway path: GatewayClient.supports() reads
+  // base64(JSON).accepts from THIS header and matches on network + extra.{name,version,
+  // verifyingContract}. Keep this object byte-identical to the proven shape — do not refactor it.
+  const headerRequired = {
     x402Version: 2,
-    resource: { url: `${req.protocol}://${req.get('host')}${req.originalUrl}`, description: 'verdict', mimeType: 'application/json' },
+    resource: { url, description: 'verdict', mimeType: 'application/json' },
     accepts: [{
       scheme: 'exact', network: ARC_NETWORK, asset: ARC_USDC, amount: amountUnits, payTo,
       maxTimeoutSeconds: 604900,
       extra: { name: 'GatewayWalletBatched', version: '1', verifyingContract: TESTNET_GATEWAY_WALLET },
     }],
   };
-  res.setHeader('PAYMENT-REQUIRED', Buffer.from(JSON.stringify(paymentRequired)).toString('base64'));
-  res.status(402).json({ error: 'Payment required', fee_usdc: VERDICT_FEE_USDC, currency: 'USDC', chain: 'arcTestnet' });
+  res.setHeader('PAYMENT-REQUIRED', Buffer.from(JSON.stringify(headerRequired)).toString('base64'));
+
+  // The BODY now carries the canonical x402 v2 PaymentRequirements shape so generic x402 clients and
+  // discovery crawlers (which read `body.accepts`, not the header) can discover this rail. Standard
+  // field names: `maxAmountRequired` (atomic), `resource` (string url), `asset`. `amount` is kept as
+  // an alias for clients that read either. Human-friendly fee fields are additive.
+  res.status(402).json({
+    x402Version: 2,
+    error: 'Payment required',
+    accepts: [{
+      scheme: 'exact',
+      network: ARC_NETWORK,
+      maxAmountRequired: amountUnits,
+      amount: amountUnits,
+      resource: url,
+      description: 'Verdikt verdict on agent work',
+      mimeType: 'application/json',
+      payTo,
+      maxTimeoutSeconds: 604900,
+      asset: ARC_USDC,
+      extra: { name: 'GatewayWalletBatched', version: '1', verifyingContract: TESTNET_GATEWAY_WALLET },
+    }],
+    fee_usdc: VERDICT_FEE_USDC,
+    currency: 'USDC',
+    chain: 'arcTestnet',
+  });
 }
 
 interface PaymentAuthorization {

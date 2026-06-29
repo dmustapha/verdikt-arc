@@ -1,12 +1,14 @@
-# Verdikt: escrow that pays a stranger agent only when the work is verified
+# Verdikt: a non-custodial settlement court for agent work
 
-Verdikt is settlement infrastructure that sits between two agents that have never met. A payer agent escrows USDC on Arc, a worker agent delivers code or data, and an evidence-anchored verdict engine releases, refunds, or abstains. It runs the work, it does not ask an opinion: tests, a static security scan, and schema checks become the evidence, and a hard deterministic floor blocks any release over a security finding even if the language model is wrong.
+Verdikt is a settlement court that sits between two agents that have never met. A payer agent escrows USDC on Arc, a worker agent delivers code or data, and an evidence-anchored verdict engine releases, refunds, or abstains. It runs the work, it does not ask an opinion: tests, a static security scan, and schema checks become the evidence, and a hard deterministic floor blocks any release over a security finding even if the language model is wrong.
+
+**Compute is chain-agnostic; only the money settles on Arc.** The agents are ordinary software calling an HTTPS API — they can run on any chain, or none. What lands on Arc is the *money*: the escrow principal and the per-verdict fee. **Why Arc:** multi-chain agents that have never met need a neutral place to settle a dispute over paid work. Arc is a USDC-denominated, single-asset, sub-second, sub-cent clearing layer — purpose-built to be that neutral court. Fragmentation across chains is exactly why a neutral settlement layer has to exist, and CCTP-to-Arc is the canonical Circle path onto it.
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 [![Foundry](https://img.shields.io/badge/Foundry-Solidity-orange)](https://book.getfoundry.sh/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-148_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-155_passing-brightgreen)]()
 
 **Live:** [verdikt-arc.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)
 
@@ -18,6 +20,8 @@ Verdikt is settlement infrastructure that sits between two agents that have neve
 **[verdikt-arc-damilolas-projects-fafdf859.vercel.app](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app)**
 
 Open the Courtroom and run any of the five cases. Each click funds a fresh escrow on Arc, the arbiter gathers evidence with no human in the loop, and the verdict settles on-chain in about 20 seconds. The bad-code case is caught by a static security scan and the deterministic floor and is refunded; clean work is released. Every settlement is a real Arc transaction, linked on the Proof and Ledger pages.
+
+**[Try it on your own task →](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app/try)** — the `/try` page is a public, rate-limited rail. Paste your *own* code + tests, JSON + schema, or answer + sources and watch a real escrow fund, judge, and settle on Arc, no wallet of your own required. It stays inside the verifiable boundary by construction: each route requires its payer ground truth, and anything unverifiable abstains and refunds rather than ever returning a wrong release.
 
 ## What Is Verdikt?
 
@@ -122,7 +126,7 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
 
 ```bash
 # Worker (verdict engine + real Docker sandbox)
-cd worker && npm test          # 105/105 passing
+cd worker && npm test          # 112/112 passing
 
 # Contracts (escrow invariants, access control, reentrancy, front-run, sweep)
 cd contracts && forge test     # 34/34 passing
@@ -145,6 +149,23 @@ WORKER_GATEWAY_KEY=… tsx scripts/gateway-buyer.ts deposit 0.05
 ```
 
 This exact path was exercised end to end against the live worker: deposit → 402 → Gateway settle → worker-signature check → single-shot judge → on-chain settle, with the fee recorded in the `/proof` counter.
+
+### Try it with no wallet: the public rail
+`POST /api/try` is a public, rate-limited rail that funds the escrow from a demo wallet, so anyone can run a real settlement without holding USDC. It is scope-gated: each route **requires** its payer ground truth or returns `400` before spending anything, and unverifiable input abstains and refunds rather than ever returning a wrong release.
+
+```bash
+# Judge a real answer against your own sources — settles on Arc, returns an explorer link.
+curl -s https://verdikt-worker.fly.dev/api/try \
+  -H 'Content-Type: application/json' -d '{
+    "workId": "0x'"$(openssl rand -hex 32)"'",
+    "route": "answer",
+    "acceptance": { "sources": "Arc is an EVM-compatible testnet with ~0.48s block time." },
+    "artifact":   { "payload": "Arc is an EVM-compatible testnet with a block time of about 0.48 seconds." }
+  }'
+# → 202 { accepted: true }; stream the steps from GET /api/stream/<workId>.
+```
+
+The browser version of this rail is the **[/try](https://verdikt-arc-damilolas-projects-fafdf859.vercel.app/try)** page.
 
 ---
 
