@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { recoverMessageAddress, keccak256, toBytes } from 'viem';
 import { requireVerdictFee, captureVerdictFee } from '../lib/x402-meter.js';
-import { getTask, recordExternalCall, claimForJudging } from '../lib/db.js';
+import { getTask, recordExternalCall, claimForJudging, escrowRowExists, recordFunded } from '../lib/db.js';
+import { readEscrowOnChain } from '../settlement/escrow-read.js';
 import { runVerdict } from '../engine/orchestrator.js';
+
+const STATUS_FUNDED = 1; // VerdiktEscrow on-chain status enum
 import type { Artifact } from '../types.js';
 
 export const verdictRouter = Router();
@@ -35,6 +38,17 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
   }
   if (signer.toLowerCase() !== task.worker.toLowerCase()) {
     res.status(403).json({ error: 'artifact signature does not match the task worker' }); return;
+  }
+
+  // Chain-authoritative reconcile: an INDEPENDENT payer may have funded the escrow directly (e.g. via
+  // the SDK) without the worker recording it. The chain is the source of truth — if there's no DB
+  // escrow row but the chain shows FUNDED for this workId, record it so judging can proceed. (The
+  // demo path already calls recordFunded, so this is a no-op there.)
+  if (!(await escrowRowExists(workId))) {
+    try {
+      const onchain = await readEscrowOnChain(workId);
+      if (Number(onchain.status) === STATUS_FUNDED) await recordFunded(workId, 'onchain-reconciled');
+    } catch { /* leave unreconciled; claimForJudging will 409 below */ }
   }
 
   // H-2: single-shot lock — only a FUNDED escrow can transition to 'judging', exactly once. A replay
