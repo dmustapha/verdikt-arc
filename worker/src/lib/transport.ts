@@ -30,12 +30,15 @@ function parseArtifact(v: unknown): Artifact | null {
 // (our callback URL) and with WHAT per-job token; the seller does the work async and either POSTs to
 // the callback (webhook) or exposes the result at resultRef for us to GET (a2a-style). Both the
 // dispatch URL and the re-fetch URL are SSRF-guarded to the registered seller origin.
-export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: number } = { workerPublicUrl: '' }): SellerTransport {
+// fetchFn is injectable so the transport is unit-testable without a live network (default = global
+// fetch). allowPrivate is an escape hatch for a localhost end-to-end wire proof only — never prod.
+export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: number; fetchFn?: typeof fetch; allowPrivate?: boolean } = { workerPublicUrl: '' }): SellerTransport {
   const timeout = opts.timeoutMs ?? 10_000;
+  const doFetch = opts.fetchFn ?? fetch;
   return {
     async dispatch(job: JobRow): Promise<void> {
       if (!job.sellerUrl) throw new Error('job has no sellerUrl to dispatch to');
-      assertSafeUrl(job.sellerUrl); // block private/loopback dispatch targets
+      assertSafeUrl(job.sellerUrl, { allowPrivate: opts.allowPrivate }); // block private/loopback dispatch targets
       const callbackPath = job.sellerProtocol === 'a2a' ? 'a2a' : 'webhook';
       const envelope = {
         workId: job.workId,
@@ -43,7 +46,7 @@ export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: numbe
         callbackToken: job.callbackToken,
         deadline: job.deadline.toISOString(),
       };
-      const res = await fetchWithTimeout(job.sellerUrl, {
+      const res = await fetchWithTimeout(doFetch, job.sellerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(envelope),
@@ -56,8 +59,8 @@ export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: numbe
       if (!ref) return null;
       const origins: string[] = [];
       for (const u of [job.sellerUrl, job.resultRef]) { if (u) try { origins.push(new URL(u).origin); } catch { /* ignore */ } }
-      assertSafeUrl(ref, { allowedOrigins: origins });
-      const res = await fetchWithTimeout(ref, { method: 'GET' }, timeout);
+      assertSafeUrl(ref, { allowedOrigins: origins, allowPrivate: opts.allowPrivate });
+      const res = await fetchWithTimeout(doFetch, ref, { method: 'GET' }, timeout);
       if (res.status === 404 || res.status === 204) return null; // not ready yet
       if (!res.ok) throw new Error(`fetchResult failed: ${res.status}`);
       const body = await res.json().catch(() => null);
@@ -68,11 +71,11 @@ export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: numbe
   };
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+async function fetchWithTimeout(doFetch: typeof fetch, url: string, init: RequestInit, ms: number): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    return await doFetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }

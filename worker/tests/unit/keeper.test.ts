@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { pollOnce, expireOnce } from '../../src/lib/keeper.js';
+import { pollOnce, expireOnce, guardedInterval } from '../../src/lib/keeper.js';
 import type { KeeperDeps } from '../../src/lib/keeper.js';
 import type { JobRow } from '../../src/lib/job-store.js';
 import type { SellerTransport } from '../../src/lib/transport.js';
@@ -96,5 +96,30 @@ describe('keeper — expireOnce (no-show)', () => {
     expect(states).toEqual(expect.arrayContaining(['FUNDED', 'DISPATCHED', 'AWAITING_DELIVERY', 'DELIVERED', 'VERIFYING']));
     expect(states).not.toContain('SETTLED');
     expect(states).not.toContain('EXPIRED');
+  });
+});
+
+describe('keeper — guardedInterval (no overlapping sweeps)', () => {
+  it('skips a tick while the previous run is still in flight', async () => {
+    let active = 0, maxConcurrent = 0, calls = 0;
+    const gates: (() => void)[] = [];
+    const slow = () => { calls++; active++; maxConcurrent = Math.max(maxConcurrent, active); return new Promise<void>((r) => gates.push(() => { active--; r(); })); };
+    const g = guardedInterval(slow, 1_000_000); // interval irrelevant; we tick manually
+    const first = g.tick();   // enters, blocks on gates[0]
+    await g.tick();           // SKIPPED (previous still running)
+    await g.tick();           // skipped again
+    expect(calls).toBe(1);
+    expect(maxConcurrent).toBe(1);
+    gates[0](); await first;  // release the first run
+    const fourth = g.tick();  // now free → runs again
+    expect(calls).toBe(2);
+    gates[1](); await fourth; // release the second run
+    g.stop();
+  });
+
+  it('a throwing sweep never breaks the loop', async () => {
+    const g = guardedInterval(async () => { throw new Error('boom'); }, 1_000_000);
+    await expect(g.tick()).resolves.toBeUndefined(); // swallowed
+    g.stop();
   });
 });

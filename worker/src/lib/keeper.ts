@@ -54,10 +54,24 @@ export async function expireOnce(deps: KeeperDeps): Promise<number> {
   return expired;
 }
 
+// Run `fn` on an interval, but SKIP a tick if the previous run is still in flight — otherwise a slow
+// sweep (e.g. expireOnce firing on-chain refunds) could overlap itself and fire duplicate txs for the
+// same job (safe on-chain via FUNDED-once, but wasted gas). Exposed for unit testing.
+export function guardedInterval(fn: () => Promise<unknown>, ms: number): { tick: () => Promise<void>; stop: () => void } {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try { await fn(); } catch { /* swept per-item; never let a sweep crash the loop */ } finally { running = false; }
+  };
+  const handle = setInterval(() => { void tick(); }, ms);
+  handle.unref?.(); // never keep the process alive just for the keeper
+  return { tick, stop: () => clearInterval(handle) };
+}
+
 // Start the background sweeps. Env-guarded by the caller so imports/tests never spawn timers.
 export function startKeeper(deps: KeeperDeps, opts: { pollMs: number; expireMs: number }): () => void {
-  const poll = setInterval(() => { void pollOnce(deps); }, opts.pollMs);
-  const expire = setInterval(() => { void expireOnce(deps); }, opts.expireMs);
-  poll.unref?.(); expire.unref?.(); // never keep the process alive just for the keeper
-  return () => { clearInterval(poll); clearInterval(expire); };
+  const poll = guardedInterval(() => pollOnce(deps), opts.pollMs);
+  const expire = guardedInterval(() => expireOnce(deps), opts.expireMs);
+  return () => { poll.stop(); expire.stop(); };
 }
