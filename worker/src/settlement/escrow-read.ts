@@ -2,9 +2,12 @@ import { createPublicClient, http } from 'viem';
 import { arcTestnet } from '../lib/chains.js';
 import { VERDIKT_ESCROW_ABI } from './escrow-abi.js';
 
+// Mirrors the v5 getEscrow() tuple (13 fields). viem decodes the ABI tuple into this named shape.
 export interface OnChainEscrow {
-  payer: `0x${string}`; worker: `0x${string}`; amount: bigint;
+  payer: `0x${string}`; worker: `0x${string}`; amount: bigint; fee: bigint; deadline: bigint;
   status: number; outcome: number; verdictCode: number; evidenceHash: `0x${string}`;
+  workerPayoutDomain: number; workerPayoutRecipient: `0x${string}`;
+  payerPayoutDomain: number; payerPayoutRecipient: `0x${string}`;
 }
 
 // Read the escrow straight from the chain — the source of truth. Used to reconcile escrows that an

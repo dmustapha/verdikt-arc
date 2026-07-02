@@ -5,6 +5,9 @@ import { streamRouter } from './routes/stream.js';
 import { demoRouter } from './routes/demo.js';
 import { tasksRouter } from './routes/tasks.js';
 import { tryRouter } from './routes/try.js';
+import { jobsRouter } from './routes/jobs.js';
+import { makeCallbackRouter } from './routes/callback.js';
+import { engine, startWorkerKeeper } from './lib/engine-instance.js';
 
 const app = express();
 // Behind Fly's proxy: trust the first hop so req.ip / X-Forwarded-For reflect the real client
@@ -25,6 +28,9 @@ app.use(streamRouter);
 app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
+app.use(jobsRouter);
+// Seller delivery callbacks feed the shared job engine's onDelivery (verify → settle).
+app.use(makeCallbackRouter(engine.onDelivery));
 
 // JSON error handler. Replaces Express's default HTML error page (which leaks
 // absolute file paths and a stack trace in the body). Malformed JSON bodies from
@@ -43,3 +49,10 @@ app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Re
 
 const port = parseInt(process.env.PORT ?? '8080', 10);
 app.listen(port, () => console.log(`[verdikt-worker] listening on :${port}`));
+
+// Background keeper: poll fallback for push-less sellers + no-show expiry. Opt-in so local/test
+// imports never spawn timers.
+if (process.env.KEEPER_ENABLED === 'true') {
+  startWorkerKeeper();
+  console.log('[verdikt-worker] keeper started (poll + no-show expiry)');
+}
