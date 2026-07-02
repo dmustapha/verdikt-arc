@@ -1,6 +1,6 @@
 // All shared worker types. Order: enums → contract/artifact → evidence → verdict → receipt → SSE.
 
-export type ArtifactType = 'code' | 'tool_output' | 'answer';
+export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
 export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
@@ -21,6 +21,21 @@ export interface SchemaField {
   pattern?: string;                          // E1: regex the string value must match
 }
 
+// execution route: what an on-chain effect must satisfy. The artifact is a tx hash on `chainId`;
+// the verifier reads the receipt (+ tx) and checks these deterministically. On-chain slice only.
+export interface ExecutionCriteria {
+  chainId: number;                           // which chain the tx lives on (must be verifier-configured)
+  status?: 'success' | 'reverted';           // required receipt status (default 'success')
+  to?: string;                               // receipt.to must equal this (the contract/recipient called)
+  from?: string;                             // tx sender must equal this
+  minValueWei?: string;                      // tx.value must be >= this (decimal wei string)
+  log?: {                                    // an emitted event must match: topic0 (+ optional address + positional topics)
+    topic0: string;                          // keccak256 of the event signature
+    address?: string;                        // emitting contract, if constrained
+    topics?: (string | null)[];              // positional topic matches; null = wildcard at that index
+  };
+}
+
 export interface Acceptance {
   spec: string;                              // human description of "good"
   tests?: string;                            // code route: payer pytest file contents
@@ -28,6 +43,7 @@ export interface Acceptance {
   jsonSchema?: Record<string, unknown>;      // tool_output route: full JSON Schema draft 2020-12 (E1)
   minResponseBytes?: number;                 // tool_output route
   sources?: string;                          // answer route: payer source text
+  execution?: ExecutionCriteria;             // execution route: on-chain effect to verify
 }
 
 export interface Task {
@@ -47,7 +63,7 @@ export interface Artifact {
 }
 
 // ── Evidence (typed, hashable) ───────────────────────────────────────────────
-export type EvidenceKind = 'test' | 'static' | 'schema_check' | 'span';
+export type EvidenceKind = 'test' | 'static' | 'schema_check' | 'span' | 'onchain';
 export type EvidenceStatus = 'pass' | 'fail' | 'error' | 'info';
 
 export interface EvidenceItem {

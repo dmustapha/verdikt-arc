@@ -4,7 +4,7 @@ import { runVerdict } from '../engine/orchestrator.js';
 import { fundEscrow } from '../settlement/fund-escrow.js';
 import { sseBus } from '../lib/sse-bus.js';
 import { createRateLimiter, clientIp } from '../lib/rate-limit.js';
-import type { Artifact, Acceptance, ArtifactType } from '../types.js';
+import type { Artifact, Acceptance, ArtifactType, ExecutionCriteria } from '../types.js';
 
 export const tryRouter = Router();
 
@@ -35,6 +35,7 @@ const SPEC: Record<ArtifactType, string> = {
   code: 'passes the payer tests with no security finding',
   tool_output: 'matches the payer JSON contract',
   answer: 'answer grounded in the payer sources',
+  execution: 'the claimed on-chain transaction satisfies the payer criteria',
 };
 
 // Build a validated Acceptance + Artifact for the chosen route, or return an error string.
@@ -69,6 +70,16 @@ export function buildTask(route: ArtifactType, body: Record<string, unknown>): {
     return { acceptance, artifact: { type: 'tool_output', payload } };
   }
 
+  if (route === 'execution') {
+    const exec = accIn.execution as Record<string, unknown> | undefined;
+    if (!exec || typeof exec !== 'object' || typeof exec.chainId !== 'number') {
+      return 'execution route requires acceptance.execution.chainId (the chain to read) — no chain, no verdict';
+    }
+    if (bytes(JSON.stringify(exec)) > MAX_FIELD_BYTES) return `acceptance.execution exceeds ${MAX_FIELD_BYTES} bytes`;
+    // payload is the claimed tx hash; the execution route validates its format + reads the receipt.
+    return { acceptance: { spec: SPEC.execution, execution: exec as unknown as ExecutionCriteria }, artifact: { type: 'execution', payload } };
+  }
+
   // answer
   const sources = accIn.sources;
   if (typeof sources !== 'string' || sources.trim() === '') return 'answer route requires acceptance.sources (the text claims must be grounded in) — no sources, no verdict';
@@ -77,7 +88,7 @@ export function buildTask(route: ArtifactType, body: Record<string, unknown>): {
 }
 
 const VALID_WORKID = /^0x[0-9a-fA-F]{64}$/;
-const ROUTES: ArtifactType[] = ['code', 'tool_output', 'answer'];
+const ROUTES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution'];
 
 // POST /api/try  body: { workId, route, acceptance, artifact }
 tryRouter.post('/api/try', async (req, res) => {
