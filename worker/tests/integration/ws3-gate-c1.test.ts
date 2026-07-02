@@ -38,7 +38,7 @@ function memStore(): JobStore {
     async getJob(id) { return rows.get(id) ?? null; },
     async markDispatched(id) { if (rows.get(id)?.state !== 'FUNDED') return false; patch(id, { state: 'DISPATCHED' }); return true; },
     async markAwaiting(id) { if (rows.get(id)?.state !== 'DISPATCHED') return false; patch(id, { state: 'AWAITING_DELIVERY' }); return true; },
-    async claimDelivery(id, art) { const s = rows.get(id)?.state; if (s !== 'DISPATCHED' && s !== 'AWAITING_DELIVERY') return false; patch(id, { state: 'DELIVERED', artifact: art }); return true; },
+    async claimDelivery(id, art) { const s = rows.get(id)?.state; if (s !== 'FUNDED' && s !== 'DISPATCHED' && s !== 'AWAITING_DELIVERY') return false; patch(id, { state: 'DELIVERED', artifact: art }); return true; },
     async markVerifying(id) { if (rows.get(id)?.state !== 'DELIVERED') return false; patch(id, { state: 'VERIFYING' }); return true; },
     async markSettled(id, outcome, tx) { if (rows.get(id)?.state !== 'VERIFYING') return false; patch(id, { state: outcome === 'abstain' ? 'ABSTAINED' : 'SETTLED', outcome, settleTxHash: tx }); return true; },
     async markExpired(id, tx) { const r = rows.get(id); if (!r || isTerminal(r.state)) return false; patch(id, { state: 'EXPIRED', outcome: 'refund', settleTxHash: tx }); return true; },

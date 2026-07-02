@@ -27,7 +27,7 @@ export function isTerminal(state: JobState): boolean {
 // keeper can no-show a job at any point before it settles); it is added programmatically below so it
 // can never fall out of sync with the state set.
 const FORWARD: Record<JobState, JobState[]> = {
-  FUNDED: ['DISPATCHED'],
+  FUNDED: ['DISPATCHED', 'DELIVERED'], // a very fast callback can deliver before the DISPATCHED write lands
   DISPATCHED: ['AWAITING_DELIVERY', 'DELIVERED'], // a fast webhook may deliver before we mark awaiting
   AWAITING_DELIVERY: ['DELIVERED'],
   DELIVERED: ['VERIFYING'],
