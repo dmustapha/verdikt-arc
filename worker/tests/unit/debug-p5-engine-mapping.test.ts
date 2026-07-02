@@ -24,13 +24,14 @@ describe('VERDICT_CODE matches on-chain uint8 contract', () => {
 });
 
 describe('OUTCOME_CODE matches on-chain uint8 contract', () => {
-  it('release=0 refund=1 abstain=2', () => {
+  it('release=0 refund=1 abstain=2 partial=3', () => {
     expect(OUTCOME_CODE.release).toBe(0);
     expect(OUTCOME_CODE.refund).toBe(1);
     expect(OUTCOME_CODE.abstain).toBe(2);
+    expect(OUTCOME_CODE.partial).toBe(3); // WS2: partial split is a distinct on-chain outcome
   });
-  it('exactly three outcomes, codes unique', () => {
-    expect(Object.keys(OUTCOME_CODE).sort()).toEqual(['abstain', 'refund', 'release']);
+  it('exactly four outcomes, codes unique', () => {
+    expect(Object.keys(OUTCOME_CODE).sort()).toEqual(['abstain', 'partial', 'refund', 'release']);
     const vals = Object.values(OUTCOME_CODE);
     expect(new Set(vals).size).toBe(vals.length);
   });
@@ -50,8 +51,9 @@ describe('verdict → outcome mapping (settlement direction)', () => {
     expect(outcomeFor(mk('fail'))).toBe('refund');
     expect(OUTCOME_CODE[outcomeFor(mk('fail'))]).toBe(1);
   });
-  it('partial → refund (conservative, to payer)', () => {
-    expect(outcomeFor(mk('partial'))).toBe('refund');
+  it('partial → partial (real bps split via settlePartial, WS2)', () => {
+    expect(outcomeFor(mk('partial'))).toBe('partial');
+    expect(OUTCOME_CODE[outcomeFor(mk('partial'))]).toBe(3);
   });
   it('abstain → abstain-default (to payer, code 2 — never release)', () => {
     expect(outcomeFor(mk('abstain'))).toBe('abstain');

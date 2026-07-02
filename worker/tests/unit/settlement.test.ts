@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { keccak256, toBytes, recoverMessageAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { outcomeFor, onChainSettleCode } from '../../src/settlement/settle.js';
+import { outcomeFor } from '../../src/settlement/settle.js';
 import { buildReceipt } from '../../src/lib/receipt.js';
 import type { VerdictResult, Settlement } from '../../src/types.js';
 
@@ -21,23 +21,13 @@ function verdict(label: VerdictResult['verdict']): VerdictResult {
   };
 }
 
+// WS2: partial now settles as a real split (settlePartial), so its off-chain outcome is 'partial'
+// (on-chain outcome enum 3), NOT a refund. The confidence 1 fixture → score 100 → bps clamped 9999.
 describe('outcomeFor', () => {
   it('pass → release', () => expect(outcomeFor(verdict('pass'))).toBe('release'));
   it('fail → refund', () => expect(outcomeFor(verdict('fail'))).toBe('refund'));
-  it('partial → refund', () => expect(outcomeFor(verdict('partial'))).toBe('refund'));
+  it('partial → partial (real split, never a full refund)', () => expect(outcomeFor(verdict('partial'))).toBe('partial'));
   it('abstain → abstain', () => expect(outcomeFor(verdict('abstain'))).toBe('abstain'));
-});
-
-// v5 settle() reverts on verdictCode==2. The worker must NEVER send code 2 to settle() — it maps
-// partial->fail(refund) until settlePartial() is wired (WS2). This locks that guard.
-describe('onChainSettleCode (v5 partial guard)', () => {
-  it('pass(0) stays 0', () => expect(onChainSettleCode(0)).toBe(0));
-  it('fail(1) stays 1', () => expect(onChainSettleCode(1)).toBe(1));
-  it('partial(2) -> 1 (refund), never sent raw to settle()', () => expect(onChainSettleCode(2)).toBe(1));
-  it('abstain(3) stays 3', () => expect(onChainSettleCode(3)).toBe(3));
-  it('never emits the rejected partial code', () => {
-    for (const c of [0, 1, 2, 3]) expect(onChainSettleCode(c)).not.toBe(2);
-  });
 });
 
 describe('buildReceipt', () => {

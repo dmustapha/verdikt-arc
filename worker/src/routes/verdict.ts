@@ -71,16 +71,19 @@ verdictRouter.post('/api/verdict', requireVerdictFee, async (req, res) => {
   const result = await runVerdict(task, artifact);
 
   // Auth-and-capture: charge the seller's authorized x402 fee ONLY when we actually rendered a
-  // verdict (release/refund) AND it settled on-chain. On `abstain` (we could not verify) or a failed
-  // settlement, we DO NOT capture — "if we couldn't verify, we don't take their money." The escrow
-  // principal is unaffected (it always refunds the payer on abstain).
+  // DEFINITIVE verdict (release / refund / partial split) AND it settled on-chain. On `abstain` (we
+  // could not verify) or a failed settlement, we DO NOT capture — "if we couldn't verify, we don't
+  // take their money." This mirrors the on-chain fee economics: the contract takes the fee on
+  // release/refund/partial and refunds it in full on abstain/no-show. The escrow principal is
+  // unaffected (it always refunds the payer on abstain).
   let feeUsdc = 0;
-  const rendered = !!result.txHash && (result.outcome === 'release' || result.outcome === 'refund');
+  const rendered = !!result.txHash
+    && (result.outcome === 'release' || result.outcome === 'refund' || result.outcome === 'partial');
   if (rendered) {
     const cap = await captureVerdictFee(res);
     feeUsdc = cap.feeUsdc;
     if (feeUsdc > 0) await recordExternalCall(workId, feeUsdc);
   }
 
-  res.json({ workId, verdict: result.verdict.verdict, outcome: result.outcome, txHash: result.txHash, feeUsdc, error: result.error });
+  res.json({ workId, verdict: result.verdict.verdict, outcome: result.outcome, txHash: result.txHash, bps: result.bps, feeUsdc, error: result.error });
 });
