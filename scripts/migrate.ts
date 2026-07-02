@@ -53,6 +53,23 @@ async function migrate() {
     job_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
 
+  // WS4 — seller registry. A curated (NOT crawled) surface of agents that registered on Verdikt's
+  // open standard, accepted deliver-then-settle terms, and passed a live health probe. Only `healthy`
+  // rows are listed in the catalog; `status` is re-probed on registration. protocol ∈ webhook|a2a|x402.
+  await sql`CREATE TABLE IF NOT EXISTS vk_sellers (
+    seller_id TEXT PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    wallet TEXT NOT NULL,
+    payout_domain INT NOT NULL,
+    agent_id TEXT,
+    status TEXT NOT NULL DEFAULT 'unhealthy',
+    terms_accepted BOOLEAN NOT NULL DEFAULT false,
+    last_probe_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+  await sql`CREATE INDEX IF NOT EXISTS vk_sellers_status_idx ON vk_sellers(status)`;
+
   console.log('migrate: schema ready');
 }
 
