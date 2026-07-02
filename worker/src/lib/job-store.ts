@@ -130,6 +130,13 @@ export async function markExpired(jobId: string, settleTxHash: string): Promise<
   return r.rowCount === 1;
 }
 
+// Persist the seller-assigned result reference discovered at dispatch (A2A task id / x402 job URL) so
+// the keeper's poll and the callback re-fetch can resolve the authoritative artifact after a worker
+// restart. Set-once (WHERE result_ref IS NULL) so a late re-dispatch can't clobber a live reference.
+export async function setResultRef(jobId: string, ref: string): Promise<void> {
+  await sql`UPDATE vk_jobs SET result_ref = ${ref}, updated_at = now() WHERE job_id = ${jobId} AND result_ref IS NULL`;
+}
+
 export async function recordDispatchAttempt(jobId: string, error?: string): Promise<void> {
   await sql`
     UPDATE vk_jobs SET dispatch_attempts = dispatch_attempts + 1, last_error = ${error ?? null}, updated_at = now()
