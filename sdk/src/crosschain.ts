@@ -141,23 +141,29 @@ export interface PayoutRoutes {
 
 const ZERO32 = pad('0x', { size: 32 });
 
+// Default no-show deadline horizon carried through the bridge: 7 days.
+const DEFAULT_TTL_SECONDS = 604800;
+
 /**
  * Encode the CCTP hookData the Arc hook decodes with
- *   abi.decode(_, (bytes32, address, address, uint32, bytes32, uint32, bytes32)).
- * MUST byte-match the Solidity decode. Omitted routes encode as local (recipient 0).
+ *   abi.decode(_, (bytes32, address, address, uint256, uint256, uint32, bytes32, uint32, bytes32)).
+ * MUST byte-match the Solidity decode (v3 layout: adds the verdict fee + no-show ttl). Omitted
+ * routes encode as local (recipient 0).
  */
 export function encodeHookData(
-  workId: `0x${string}`, payer: `0x${string}`, worker: `0x${string}`, routes?: PayoutRoutes,
+  workId: `0x${string}`, payer: `0x${string}`, worker: `0x${string}`,
+  fee: bigint, ttl: bigint, routes?: PayoutRoutes,
 ): `0x${string}` {
   const w = routes?.worker;
   const p = routes?.payer;
   return encodeAbiParameters(
     [
       { type: 'bytes32' }, { type: 'address' }, { type: 'address' },
+      { type: 'uint256' }, { type: 'uint256' },
       { type: 'uint32' }, { type: 'bytes32' }, { type: 'uint32' }, { type: 'bytes32' },
     ],
     [
-      workId, payer, worker,
+      workId, payer, worker, fee, ttl,
       w ? w.domain : 0, w ? addressToBytes32(w.recipient) : ZERO32,
       p ? p.domain : 0, p ? addressToBytes32(p.recipient) : ZERO32,
     ],
@@ -182,6 +188,8 @@ export async function depositForBurnWithHook(params: {
   workId: `0x${string}`;
   payer: `0x${string}`;
   worker: `0x${string}`;
+  feeUsdc?: number;         // verdict fee escrowed alongside the bounty (default 0)
+  ttlSeconds?: number;      // no-show deadline horizon (default 7 days)
   routes?: PayoutRoutes;
   maxFeeUsdc?: number;
   minFinalityThreshold?: number;
@@ -196,8 +204,10 @@ export async function depositForBurnWithHook(params: {
 
   const amount = parseUnits(params.amountUsdc.toFixed(6), 6);
   const maxFee = parseUnits((params.maxFeeUsdc ?? 0.05).toFixed(6), 6);
+  const verdictFee = parseUnits((params.feeUsdc ?? 0).toFixed(6), 6);
+  const ttl = BigInt(params.ttlSeconds ?? DEFAULT_TTL_SECONDS);
   const hookBytes32 = addressToBytes32(config.hook);
-  const hookData = encodeHookData(params.workId, params.payer, params.worker, params.routes);
+  const hookData = encodeHookData(params.workId, params.payer, params.worker, verdictFee, ttl, params.routes);
   // Fast where the source supports it, else standard (Circle treats <1000 as fast, >=2000 as standard).
   const finality = params.minFinalityThreshold ?? (src.fastSource ? FAST_FINALITY_THRESHOLD : STANDARD_FINALITY_THRESHOLD);
 
@@ -321,6 +331,8 @@ export async function fundCrossChainEscrow(params: {
   workId: `0x${string}`;
   payer: `0x${string}`;
   worker: `0x${string}`;
+  feeUsdc?: number;         // verdict fee escrowed alongside the bounty (default 0)
+  ttlSeconds?: number;      // no-show deadline horizon (default 7 days)
   routes?: PayoutRoutes;
   config: CrossChainConfig;
   maxFeeUsdc?: number;

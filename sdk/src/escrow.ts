@@ -30,8 +30,8 @@ const ESCROW_ABI = [
     type: 'function', name: 'fundWithAuthorization', stateMutability: 'nonpayable',
     inputs: [
       { name: 'workId', type: 'bytes32' }, { name: 'worker', type: 'address' },
-      { name: 'amount', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
-      { name: 'validBefore', type: 'uint256' }, { name: 'sig', type: 'bytes' },
+      { name: 'amount', type: 'uint256' }, { name: 'fee', type: 'uint256' }, { name: 'ttl', type: 'uint256' },
+      { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'sig', type: 'bytes' },
       PAYOUT_ROUTES_TUPLE,
     ],
     outputs: [],
@@ -42,6 +42,7 @@ const ESCROW_ABI = [
     outputs: [{
       type: 'tuple', components: [
         { name: 'payer', type: 'address' }, { name: 'worker', type: 'address' }, { name: 'amount', type: 'uint256' },
+        { name: 'fee', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
         { name: 'status', type: 'uint8' }, { name: 'outcome', type: 'uint8' }, { name: 'verdictCode', type: 'uint8' },
         { name: 'evidenceHash', type: 'bytes32' },
         { name: 'workerPayoutDomain', type: 'uint32' }, { name: 'workerPayoutRecipient', type: 'bytes32' },
@@ -62,7 +63,7 @@ const RECEIVE_TYPES = {
 function rpc(rpcUrl?: string) { return http(rpcUrl ?? DEFAULT_RPC); }
 
 export interface EscrowState {
-  payer: `0x${string}`; worker: `0x${string}`; amount: bigint;
+  payer: `0x${string}`; worker: `0x${string}`; amount: bigint; fee: bigint; deadline: bigint;
   status: number; outcome: number; verdictCode: number; evidenceHash: `0x${string}`;
   workerPayoutDomain: number; workerPayoutRecipient: `0x${string}`;
   payerPayoutDomain: number; payerPayoutRecipient: `0x${string}`;
@@ -91,12 +92,18 @@ export async function readEscrow(escrow: `0x${string}`, workId: `0x${string}`, r
 const USDC_EIP712_NAME = 'USDC';
 const USDC_EIP712_VERSION = '2';
 
+// Default no-show deadline horizon: 7 days. Verdict fee defaults to 0 (buyer funds bounty only) —
+// callers wire a real fee when charging for verification-in-escrow.
+const DEFAULT_TTL_SECONDS = 604800;
+
 export async function fundEscrow(params: {
   account: Account;
   escrow: `0x${string}`;
   workId: `0x${string}`;
   seller: `0x${string}`;
-  amountUsdc: number;
+  amountUsdc: number;       // TOTAL escrowed (bounty + fee); this is the value pulled via EIP-3009
+  feeUsdc?: number;         // verdict fee subset of amountUsdc (default 0); paid to Verdikt on a verdict
+  ttlSeconds?: number;      // no-show deadline horizon (default 7 days)
   rpcUrl?: string;
   nowMs: number;            // injected for determinism/testability
   usdcName?: string;
@@ -109,13 +116,17 @@ export async function fundEscrow(params: {
   const pub = createPublicClient({ chain: arcTestnet, transport: rpc(params.rpcUrl) });
 
   const value = parseUnits(params.amountUsdc.toFixed(6), 6);
+  const fee = parseUnits((params.feeUsdc ?? 0).toFixed(6), 6);
+  const ttl = BigInt(params.ttlSeconds ?? DEFAULT_TTL_SECONDS);
   const now = BigInt(Math.floor(params.nowMs / 1000));
   const validAfter = now - 600n;
   const validBefore = now + 3600n;
 
+  // Nonce binds the exact task AND its economics — must equal the contract's
+  // keccak256(abi.encode(workId, worker, amount, fee, ttl, payer)).
   const nonce = keccak256(encodeAbiParameters(
-    [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }],
-    [params.workId, params.seller, value, account.address],
+    [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address' }],
+    [params.workId, params.seller, value, fee, ttl, account.address],
   ));
 
   const signature = await account.signTypedData({
@@ -131,7 +142,7 @@ export async function fundEscrow(params: {
 
   const data = encodeFunctionData({
     abi: ESCROW_ABI, functionName: 'fundWithAuthorization',
-    args: [params.workId, params.seller, value, validAfter, validBefore, signature, params.routes ?? LOCAL_ROUTES],
+    args: [params.workId, params.seller, value, fee, ttl, validAfter, validBefore, signature, params.routes ?? LOCAL_ROUTES],
   });
   const hash = await wallet.sendTransaction({ to: params.escrow, data });
   const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 30_000 });
