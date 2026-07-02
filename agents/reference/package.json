@@ -1,0 +1,25 @@
+{
+  "name": "@verdikt/reference-sellers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deployable Claude-powered reference seller agents implementing the Verdikt standard (A2A card + signed webhook)",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "register": "tsx src/register.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^0.3.13",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.19.43",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.9"
+  }
+}
