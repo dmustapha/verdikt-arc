@@ -48,6 +48,7 @@ let sellerServer: Server, sellerBase = '';
 let engine: ReturnType<typeof makeEngine>;
 let keeperDeps: KeeperDeps;
 const collected = { paidCount: 0, paidValue: null as string | null };
+const receivedEnvelopes: unknown[] = [];
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const listen = (app: express.Express): Promise<{ server: Server; base: string }> =>
@@ -70,6 +71,7 @@ function makeSellerApp(): express.Express {
   app.use(express.json());
   app.post('/dispatch', (req, res) => {
     const base = `http://${req.get('host')}`; // self-consistent origin — no pre-bound port needed
+    receivedEnvelopes.push(req.body);
     const paySig = req.get('payment-signature');
     if (!paySig) {
       res.status(402).set('PAYMENT-REQUIRED', encodePaymentRequiredHeader(paymentRequired(base))).end();
@@ -129,6 +131,9 @@ describe('x402 seller round-trip over real sockets', () => {
     await insertTask(task);
 
     await engine.startJob({ jobId, workId, sellerUrl: `${sellerBase}/dispatch`, sellerProtocol: 'x402', callbackToken: `tok-${suffix}`, resultRef: null, deadline: new Date(Date.now() + 3600_000) });
+
+    // The seller received its route-filtered BRIEF in the task envelope (Option C).
+    expect((receivedEnvelopes[0] as { brief?: unknown }).brief).toEqual({ type: 'answer', spec: 'answer grounded', sources: 'The x402 seller delivered a grounded answer.' });
 
     // Reconciliation invariant, proven over the wire: exactly one toll, at most the cap. Never the bounty.
     expect(collected.paidCount).toBe(1);

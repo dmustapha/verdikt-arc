@@ -76,6 +76,7 @@ export function x402Driver(opts: X402DriverOpts): SellerTransport {
       if (!job.sellerUrl) throw new Error('x402 job has no sellerUrl to dispatch to');
       const envelope = {
         workId: job.workId,
+        brief: job.brief ?? null, // the seller's route-filtered input (Option C)
         callbackUrl: `${opts.workerPublicUrl ?? ''}/webhook/callback/${job.jobId}`,
         callbackToken: job.callbackToken,
         deadline: job.deadline.toISOString(),

@@ -37,7 +37,12 @@ export interface ExecutionCriteria {
 }
 
 export interface Acceptance {
-  spec: string;                              // human description of "good"
+  spec: string;                              // human description of "good" (the internal/governing spec)
+  sellerBrief?: string;                      // OPTIONAL public brief shown to the seller instead of `spec`.
+                                             // Set it to brief the seller informally while the strict
+                                             // acceptance still governs the money (the honest seller-gap
+                                             // model). When set on a code task, the exact `tests` stay
+                                             // hidden from the seller. Never a verification criterion.
   tests?: string;                            // code route: payer pytest file contents
   schema?: Record<string, SchemaField>;      // tool_output route: payer field map (simple form)
   jsonSchema?: Record<string, unknown>;      // tool_output route: full JSON Schema draft 2020-12 (E1)
@@ -62,6 +67,19 @@ export interface Task {
   payer: `0x${string}`;
   worker: `0x${string}`;
   amountUsdc: number;
+}
+
+// ── Seller-facing brief (Option C: rides in the dispatch envelope) ────────────
+// The deliberately route-filtered projection of a Task the seller receives at dispatch: exactly the
+// input it needs to do the work, never the payer's full verification criteria. Built by buildSellerBrief
+// (lib/seller-brief.ts); resolved in-memory at dispatch (dispatch is one-shot), so it needs no DB column.
+export interface SellerBrief {
+  type: ArtifactType;                        // what kind of deliverable to produce
+  spec: string;                              // the public task description (acceptance.sellerBrief ?? acceptance.spec)
+  sources?: string;                          // answer route: reference text to ground the answer in
+  schema?: Record<string, SchemaField>;      // tool_output route: target field map
+  jsonSchema?: Record<string, unknown>;      // tool_output route: full JSON Schema
+  tests?: string;                            // code route (fair mode only): the failing test to make pass
 }
 
 // ── Worker delivery ──────────────────────────────────────────────────────────
