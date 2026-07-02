@@ -27,14 +27,27 @@ const RECEIVE_TYPES = {
   ],
 } as const;
 
-// Fund a task's escrow via an EIP-3009 authorization the payer signs. The nonce is
-// derived from (workId, worker, amount, payer) — identical to the contract — so the
-// signed authorization is bound to this exact task and cannot be rebound by a front-runner.
+// Local (Arc) payout routes — recipient 0 pays the on-chain party on Arc.
+const LOCAL_ROUTES = {
+  workerDomain: 0,
+  workerRecipient: `0x${'00'.repeat(32)}` as `0x${string}`,
+  payerDomain: 0,
+  payerRecipient: `0x${'00'.repeat(32)}` as `0x${string}`,
+} as const;
+
+// Default no-show deadline horizon: 7 days.
+const DEFAULT_TTL_SECONDS = 604800;
+
+// Fund a task's escrow via an EIP-3009 authorization the payer signs. The nonce is derived from
+// (workId, worker, amount, fee, ttl, payer) — identical to the contract (v5) — so the signed
+// authorization is bound to this exact task AND its economics, and cannot be rebound by a front-runner.
 export async function fundEscrow(params: {
   payerKey: `0x${string}`;
   workId: `0x${string}`;
   worker: `0x${string}`;
-  amountUsdc: number;
+  amountUsdc: number;       // TOTAL escrowed (bounty + fee)
+  feeUsdc?: number;         // verdict fee subset (default 0)
+  ttlSeconds?: number;      // no-show deadline horizon (default 7 days)
 }): Promise<`0x${string}`> {
   const account = privateKeyToAccount(params.payerKey);
   const escrow = process.env.ESCROW_ADDRESS as `0x${string}`;
@@ -42,15 +55,17 @@ export async function fundEscrow(params: {
   const pub = createPublicClient({ chain: arcTestnet, transport: http(process.env.ARC_RPC_URL) });
 
   const value = parseUnits(params.amountUsdc.toFixed(6), 6);
+  const fee = parseUnits((params.feeUsdc ?? 0).toFixed(6), 6);
+  const ttl = BigInt(params.ttlSeconds ?? DEFAULT_TTL_SECONDS);
   const now = BigInt(Math.floor(Date.now() / 1000));
   const validAfter = now - 600n;
   const validBefore = now + 3600n;
 
-  // Derived nonce — must equal keccak256(abi.encode(workId, worker, amount, payer)) in the contract.
+  // Derived nonce — must equal keccak256(abi.encode(workId, worker, amount, fee, ttl, payer)).
   const nonce = keccak256(
     encodeAbiParameters(
-      [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }],
-      [params.workId, params.worker, value, account.address],
+      [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address' }],
+      [params.workId, params.worker, value, fee, ttl, account.address],
     ),
   );
 
@@ -66,7 +81,7 @@ export async function fundEscrow(params: {
   const data = encodeFunctionData({
     abi: VERDIKT_ESCROW_ABI,
     functionName: 'fundWithAuthorization',
-    args: [params.workId, params.worker, value, validAfter, validBefore, signature],
+    args: [params.workId, params.worker, value, fee, ttl, validAfter, validBefore, signature, LOCAL_ROUTES],
   });
   const hash = await wallet.sendTransaction({ to: escrow, data });
   const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 30_000 });
