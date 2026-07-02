@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { encodePaymentRequiredHeader } from '@x402/core/http';
 import { privateKeyToAccount } from 'viem/accounts';
 import { x402Driver } from '../../src/lib/adapter/x402.js';
+import { dispatchWithRetry } from '../../src/lib/dispatcher.js';
 import type { JobRow } from '../../src/lib/job-store.js';
 
 // x402 driver against a MOCK x402 seller (real @x402/fetch + @x402/evm doing the actual EIP-3009
@@ -95,6 +96,41 @@ describe('x402Driver.dispatch — toll-only, reconciliation invariant', () => {
     const { fetchFn, state } = mockSeller('1000000'); // $1.00 — a bounty-sized ask
     await expect(x402Driver(driverOpts(fetchFn)).dispatch(job())).rejects.toThrow(/cap|toll/i);
     expect(state.paidCount).toBe(0); // no payment header ever sent
+  });
+});
+
+describe('x402Driver.dispatch — never pays the toll twice across retries', () => {
+  // A seller that ALWAYS takes the toll (402→202) but never returns a job URL. Under dispatchWithRetry
+  // this must cost exactly ONE toll, not one per attempt — a paid-but-unpollable dispatch is terminal
+  // (the job no-shows and refunds the buyer), it does not re-pay.
+  function tollButNoJobUrl() {
+    const state = { paidCount: 0 };
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(typeof input === 'string' ? input : input.href, init);
+      if (!req.headers.get('PAYMENT-SIGNATURE')) {
+        return new Response('', { status: 402, headers: { 'PAYMENT-REQUIRED': encodePaymentRequiredHeader(paymentRequired('1000')) } });
+      }
+      state.paidCount++;
+      return new Response(JSON.stringify({ ok: true }), { status: 202, headers: { 'content-type': 'application/json' } }); // no jobUrl
+    }) as unknown as typeof fetch;
+    return { fetchFn, state };
+  }
+
+  it('pays exactly once even when dispatchWithRetry runs 3 attempts', async () => {
+    const { fetchFn, state } = tollButNoJobUrl();
+    const driver = x402Driver(driverOpts(fetchFn));
+    const ok = await dispatchWithRetry(job(), driver, {
+      recordDispatchAttempt: async () => {}, sleep: async () => {}, maxAttempts: 3, baseDelayMs: 1,
+    });
+    expect(ok).toBe(true);            // dispatch is terminal, not an error → the retry loop stops
+    expect(state.paidCount).toBe(1);  // ONE toll, never three
+  });
+
+  it('a rejected PAYMENT (still 402) IS retryable — the toll was not settled', async () => {
+    // The seller never accepts the payment (returns 402 even with the signature) → toll not spent →
+    // dispatch throws so the retry loop can try again, then gives up (funds stay FUNDED for refund).
+    const fetchFn = vi.fn(async () => new Response('', { status: 402, headers: { 'PAYMENT-REQUIRED': encodePaymentRequiredHeader(paymentRequired('1000')) } })) as unknown as typeof fetch;
+    await expect(x402Driver(driverOpts(fetchFn)).dispatch(job())).rejects.toThrow(/toll|accept|payment/i);
   });
 });
 
