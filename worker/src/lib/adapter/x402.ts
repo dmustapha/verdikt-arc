@@ -80,13 +80,30 @@ export function x402Driver(opts: X402DriverOpts): SellerTransport {
         callbackToken: job.callbackToken,
         deadline: job.deadline.toISOString(),
       };
+
+      // ── Pay phase (RETRYABLE) ──────────────────────────────────────────────────────────────────
+      // A throw here has NOT spent a toll — the selector refuses an over-cap ask before signing, and an
+      // unreachable seller never receives a signed authorization — so it is safe for dispatchWithRetry
+      // to retry. Once payFetch RETURNS, the toll has been paid.
       const res = await payFetch(job)(job.sellerUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope),
       });
-      if (!res.ok) throw new Error(`x402 dispatch failed: seller returned ${res.status}`);
-      const jobUrl = await readJobUrl(res);
-      if (!jobUrl) throw new Error('x402 seller returned no job URL (async 202 + job URL expected)');
-      if (opts.onResultRef) await opts.onResultRef(job.jobId, jobUrl);
+
+      // A still-402 response means the seller never accepted the payment → the toll was NOT settled, so
+      // this one IS retryable (throw).
+      if (res.status === 402) throw new Error('x402 dispatch failed: seller did not accept the toll payment');
+
+      // ── Post-payment (NEVER RE-PAY) ────────────────────────────────────────────────────────────
+      // The toll is now spent. From here we MUST NOT throw: a throw would make dispatchWithRetry invoke
+      // dispatch again and pay a SECOND toll. Any problem below is terminal-for-dispatch — the job goes
+      // AWAITING with no pollable ref, no-shows at the deadline, and the buyer is refunded (having lost
+      // only the single sub-cent toll, never a second).
+      if (!res.ok) return; // seller took the toll but rejected the task → let it no-show, don't re-pay
+      const jobUrl = await readJobUrl(res).catch(() => null);
+      if (jobUrl && opts.onResultRef) {
+        // Best-effort persistence — a DB blip must not cost a second toll.
+        try { await opts.onResultRef(job.jobId, jobUrl); } catch { /* unpersisted → job no-shows */ }
+      }
     },
 
     async fetchResult(job: JobRow, resultRef?: string): Promise<Artifact | null> {
