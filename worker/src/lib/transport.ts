@@ -1,6 +1,7 @@
 import { assertSafeUrl } from './ssrf.js';
+import { extractArtifact } from './adapter/normalize.js';
 import type { JobRow } from './job-store.js';
-import type { Artifact, ArtifactType } from '../types.js';
+import type { Artifact } from '../types.js';
 
 // The seller transport seam (WS3). A job is dispatched to a seller and its result is fetched back.
 // WS3 ships ONE concrete transport (signed HTTP webhook + generic GET re-fetch) — enough for the
@@ -12,18 +13,6 @@ export interface SellerTransport {
   dispatch(job: JobRow): Promise<void>;
   // Authoritative result fetch (A2A tasks/get / webhook poll). null ⇒ not ready yet (poller retries).
   fetchResult(job: JobRow, resultRef?: string): Promise<Artifact | null>;
-}
-
-const ARTIFACT_TYPES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution', 'tool_trace'];
-
-function parseArtifact(v: unknown): Artifact | null {
-  if (!v || typeof v !== 'object') return null;
-  const a = v as Record<string, unknown>;
-  if (!ARTIFACT_TYPES.includes(a.type as ArtifactType)) return null;
-  if (typeof a.payload !== 'string' || a.payload.trim() === '') return null;
-  const art: Artifact = { type: a.type as ArtifactType, payload: a.payload };
-  if (a.language === 'python' || a.language === 'typescript') art.language = a.language;
-  return art;
 }
 
 // Default HTTP transport. dispatch() POSTs a signed envelope telling the seller WHERE to call back
@@ -64,9 +53,8 @@ export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: numbe
       if (res.status === 404 || res.status === 204) return null; // not ready yet
       if (!res.ok) throw new Error(`fetchResult failed: ${res.status}`);
       const body = await res.json().catch(() => null);
-      // The seller may wrap the artifact under `artifact`, or return it bare.
-      const candidate = body && typeof body === 'object' && 'artifact' in body ? (body as Record<string, unknown>).artifact : body;
-      return parseArtifact(candidate);
+      // The seller may wrap the artifact under `artifact`, or return it bare (shared normalizer).
+      return extractArtifact(body);
     },
   };
 }
