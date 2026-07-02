@@ -6,6 +6,7 @@ import { demoRouter } from './routes/demo.js';
 import { tasksRouter } from './routes/tasks.js';
 import { tryRouter } from './routes/try.js';
 import { jobsRouter } from './routes/jobs.js';
+import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
 import { engine, startWorkerKeeper } from './lib/engine-instance.js';
 
@@ -29,6 +30,8 @@ app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
 app.use(jobsRouter);
+// Seller registry: register (validate → probe → store healthy/unhealthy) + list the healthy catalog.
+app.use(makeSellersRouter());
 // Seller delivery callbacks feed the shared job engine's onDelivery (verify → settle).
 app.use(makeCallbackRouter(engine.onDelivery));
 
