@@ -25,6 +25,34 @@ async function migrate() {
   await sql`CREATE TABLE IF NOT EXISTS vk_external_calls (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, work_id TEXT, fee_usdc NUMERIC(10,6),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+
+  // WS3 — async job lifecycle. A job is the orchestration record above a funded escrow: dispatched
+  // to a seller, awaits async delivery, then verifies + settles. state ∈ job-machine.JOB_STATES.
+  await sql`CREATE TABLE IF NOT EXISTS vk_jobs (
+    job_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES vk_tasks(work_id),
+    state TEXT NOT NULL DEFAULT 'FUNDED',
+    seller_url TEXT,
+    seller_protocol TEXT NOT NULL DEFAULT 'webhook',
+    callback_token TEXT NOT NULL,
+    result_ref TEXT,
+    deadline TIMESTAMPTZ NOT NULL,
+    dispatch_attempts INT NOT NULL DEFAULT 0,
+    artifact JSONB,
+    outcome TEXT,
+    settle_tx_hash TEXT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+  await sql`CREATE INDEX IF NOT EXISTS vk_jobs_state_idx ON vk_jobs(state)`;
+
+  // Replay defense for signed callbacks: a jti (JWT id / per-task id) may be redeemed once. The PK
+  // makes the dedupe atomic — a replayed jti fails the INSERT and is rejected upstream.
+  await sql`CREATE TABLE IF NOT EXISTS vk_seen_jti (
+    jti TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+
   console.log('migrate: schema ready');
 }
 
