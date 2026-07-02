@@ -3,6 +3,7 @@ import { runCodeRoute } from './code-route.js';
 import { runSchemaRoute } from './schema-route.js';
 import { runGroundingRoute } from './grounding-route.js';
 import { runGroundingV2 } from './grounding-nli.js';
+import { runExecutionRoute } from './execution-route.js';
 import { reasonOverEvidence } from './reasoner.js';
 import { settleVerdict, outcomeFor } from '../settlement/settle.js';
 import { buildReceipt } from '../lib/receipt.js';
@@ -26,6 +27,7 @@ async function routeArtifact(task: Task, artifact: Artifact): Promise<EvidenceBu
     case 'answer': return process.env.GROUNDING_V2 === 'true'
       ? runGroundingV2(task.acceptance, artifact)
       : runGroundingRoute(task.acceptance, artifact);
+    case 'execution': return runExecutionRoute(task.acceptance, artifact);
   }
 }
 

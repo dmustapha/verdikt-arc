@@ -1,17 +1,30 @@
 // Public SDK types. Kept deliberately small and mirrored from the worker contract so an integrating
 // agent depends only on @verdikt/sdk, never on the worker internals.
 
-export type ArtifactType = 'code' | 'tool_output' | 'answer';
+export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
 export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
-// What the PAYER commits to up front. Exactly one of tests / schema / sources is meaningful per type.
+// execution route: an on-chain effect to verify. The artifact is a tx hash on `chainId`; the verifier
+// reads the receipt and checks these deterministically. On-chain slice only.
+export interface ExecutionCriteria {
+  chainId: number;
+  status?: 'success' | 'reverted';
+  to?: string;
+  from?: string;
+  minValueWei?: string;
+  log?: { topic0: string; address?: string; topics?: (string | null)[] };
+}
+
+// What the PAYER commits to up front. Exactly one of tests / schema / sources / execution is
+// meaningful per type.
 export interface Acceptance {
   spec: string;
   tests?: string;                              // code route: payer pytest file contents
   schema?: Record<string, SchemaField>;        // tool_output route: payer JSON schema
   minResponseBytes?: number;                    // tool_output route
   sources?: string;                             // answer route: payer source text
+  execution?: ExecutionCriteria;                // execution route: on-chain effect to verify
 }
 
 export interface SchemaField {
