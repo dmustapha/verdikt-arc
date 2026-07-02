@@ -4,7 +4,7 @@ import { insertTask } from '../../src/lib/db.js';
 import {
   createJob, getJob, getJobByWorkId,
   markDispatched, markAwaiting, claimDelivery, markVerifying, markSettled, markExpired,
-  recordDispatchAttempt, listByState, recordSeenJti,
+  recordDispatchAttempt, listByState, recordSeenJti, setResultRef,
 } from '../../src/lib/job-store.js';
 import type { Task, Artifact } from '../../src/types.js';
 
@@ -127,6 +127,17 @@ describe('job-store — atomic transitions', () => {
     expect(await markExpired(job, '0xtxexpire')).toBe(true);
     expect((await getJob(job))!.state).toBe('EXPIRED');
     expect(await markExpired(job, '0xtxexpire2')).toBe(false); // already terminal
+  });
+
+  it('setResultRef persists the seller-assigned reference once (A2A task id / x402 job URL)', async () => {
+    const work = mkWork('rref'); const job = `job-${suffix}-rref`; ids.push({ work, job });
+    await seedTask(work);
+    await createJob({ jobId: job, workId: work, sellerUrl: 'https://s/x', sellerProtocol: 'a2a', callbackToken: 't', resultRef: null, deadline });
+    await setResultRef(job, 'task-abc');
+    expect((await getJob(job))!.resultRef).toBe('task-abc');
+    // Idempotent: a late second discovery does not clobber the first (only sets when NULL).
+    await setResultRef(job, 'task-different');
+    expect((await getJob(job))!.resultRef).toBe('task-abc');
   });
 
   it('recordDispatchAttempt increments the counter and stores the error', async () => {

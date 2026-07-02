@@ -1,5 +1,9 @@
 import * as jobStore from './job-store.js';
 import { httpTransport } from './transport.js';
+import type { SellerTransport } from './transport.js';
+import { sellerAdapter } from './adapter/index.js';
+import { a2aDriver } from './adapter/a2a.js';
+import { x402Driver } from './adapter/x402.js';
 import { runVerdict } from '../engine/orchestrator.js';
 import { getTask } from './db.js';
 import { refundExpiredOnChain } from '../settlement/expire.js';
@@ -7,15 +11,44 @@ import { makeEngine } from './job-engine.js';
 import type { JobStore } from './job-engine.js';
 import { startKeeper } from './keeper.js';
 
-// Production job engine, wired to the real store / HTTP transport / verdict engine / on-chain refund.
-// A single shared instance so the jobs routes, the callback router, and the keeper all drive the same
-// lifecycle. The job-store module structurally satisfies JobStore.
+// Production job engine, wired to the real store / generic seller adapter / verdict engine / on-chain
+// refund. A single shared instance so the jobs routes, the callback router, and the keeper all drive
+// the same lifecycle. The job-store module structurally satisfies JobStore.
 const store: JobStore = jobStore;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Shared with the keeper so poll-fetch and dispatch use one SSRF-guarded HTTP transport.
-export const transport = httpTransport({ workerPublicUrl: process.env.WORKER_PUBLIC_URL ?? '' });
+const workerPublicUrl = process.env.WORKER_PUBLIC_URL ?? '';
+// Both A2A and x402 discover the seller's authoritative reference at dispatch (task id / job URL);
+// persist it so the keeper poll + callback re-fetch resolve after a restart.
+const onResultRef = jobStore.setResultRef;
+
+// x402 needs a funded toll payer. Absent a key (most envs), x402 sellers are unsupported rather than
+// crashing the worker at import — the driver refuses on dispatch and the no-show deadline refunds.
+function buildX402Driver(): SellerTransport {
+  const key = process.env.X402_TOLL_PAYER_KEY as `0x${string}` | undefined;
+  if (!key) {
+    return {
+      async dispatch() { throw new Error('x402 seller support not configured (set X402_TOLL_PAYER_KEY)'); },
+      async fetchResult() { return null; },
+    };
+  }
+  return x402Driver({
+    network: (process.env.X402_NETWORK as `eip155:${string}`) ?? 'eip155:5042002', // Arc
+    tollCapAtomic: BigInt(process.env.X402_TOLL_CAP_ATOMIC ?? '10000'),             // $0.01 hard ceiling
+    privateKey: key,
+    workerPublicUrl,
+    onResultRef,
+  });
+}
+
+// The generic seller adapter: ONE SellerTransport over three real drivers, routed by job.sellerProtocol.
+// Shared with the keeper so poll-fetch and dispatch use the same adapter (all SSRF-guarded).
+export const transport: SellerTransport = sellerAdapter({
+  webhook: httpTransport({ workerPublicUrl }),
+  a2a: a2aDriver({ workerPublicUrl, onResultRef }),
+  x402: buildX402Driver(),
+});
 
 export const engine = makeEngine({
   store,
