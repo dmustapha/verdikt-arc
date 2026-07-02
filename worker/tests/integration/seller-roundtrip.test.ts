@@ -103,6 +103,8 @@ describe('seller round-trip over real sockets', () => {
     // The seller actually received a dispatch envelope pointing back at OUR callback URL.
     expect(dispatchesReceived).toHaveLength(1);
     expect((dispatchesReceived[0] as { callbackUrl: string }).callbackUrl).toBe(`${workerBase}/webhook/callback/${jobId}`);
+    // …and its route-filtered brief (Option C): the question + the sources to ground in.
+    expect((dispatchesReceived[0] as { brief?: unknown }).brief).toEqual({ type: 'answer', spec: 'answer grounded', sources: 'the seller is right' });
 
     // The artifact that was verified is the one the seller sent over the wire (not a local shortcut).
     expect(verify).toHaveBeenCalledWith(expect.objectContaining({ workId }), deliveredArtifact);

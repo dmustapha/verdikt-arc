@@ -1,5 +1,5 @@
 import { sql } from '@vercel/postgres';
-import type { Artifact, Outcome } from '../types.js';
+import type { Artifact, Outcome, SellerBrief } from '../types.js';
 import { outcomeToState } from './job-machine.js';
 import type { JobState } from './job-machine.js';
 
@@ -24,6 +24,10 @@ export interface JobRow {
   outcome: Outcome | null;
   settleTxHash: string | null;
   lastError: string | null;
+  // Seller-facing brief (Option C). Resolved in-memory at dispatch (dispatch is one-shot) and attached
+  // to the job the transport dispatches — NOT a DB column, so it is absent on rows read back from the
+  // store. Transports include it in the envelope when present.
+  brief?: SellerBrief | null;
 }
 
 interface JobDbRow {

@@ -31,6 +31,7 @@ export function httpTransport(opts: { workerPublicUrl: string; timeoutMs?: numbe
       const callbackPath = job.sellerProtocol === 'a2a' ? 'a2a' : 'webhook';
       const envelope = {
         workId: job.workId,
+        brief: job.brief ?? null, // the seller's route-filtered input (Option C)
         callbackUrl: `${opts.workerPublicUrl}/${callbackPath}/callback/${job.jobId}`,
         callbackToken: job.callbackToken,
         deadline: job.deadline.toISOString(),

@@ -48,6 +48,7 @@ export function a2aDriver(opts: A2ADriverOpts = {}): SellerTransport {
       const client = await clientFor(job.sellerUrl);
       const envelope = {
         workId: job.workId,
+        brief: job.brief ?? null, // the seller's route-filtered input (Option C), carried in the DataPart
         callbackUrl: `${opts.workerPublicUrl ?? ''}/a2a/callback/${job.jobId}`,
         callbackToken: job.callbackToken,
         deadline: job.deadline.toISOString(),

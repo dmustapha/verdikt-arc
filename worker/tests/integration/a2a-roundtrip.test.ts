@@ -133,6 +133,10 @@ describe('A2A seller round-trip over real sockets', () => {
     expect(sentEnvelopes).toHaveLength(1);
     expect((sentEnvelopes[0] as { workId: string }).workId).toBe(workId);
 
+    // The seller received its route-filtered BRIEF in the message (Option C): the question + the
+    // sources to ground in — enough to actually do the work over the wire.
+    expect((sentEnvelopes[0] as { brief?: unknown }).brief).toEqual({ type: 'answer', spec: 'answer grounded', sources: 'Paris is the capital of France.' });
+
     // dispatch persisted the server-assigned task id as the job's resultRef (so poll survives a restart).
     const afterDispatch = await jobStore.getJob(jobId);
     expect(afterDispatch!.resultRef).toBeTruthy();

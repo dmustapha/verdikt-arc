@@ -5,6 +5,7 @@ import type { Delivery } from '../routes/callback.js';
 import type { VerdictRunResult } from '../engine/orchestrator.js';
 import { isTerminal } from './job-machine.js';
 import { dispatchWithRetry } from './dispatcher.js';
+import { buildSellerBrief } from './seller-brief.js';
 
 // The WS3 job engine: the ONE place that drives a funded escrow through the async lifecycle
 // (dispatch → await delivery → verify → settle) and the no-show path (expire → refundExpired). Every
@@ -64,7 +65,14 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     const job = await store.getJob(input.jobId);
     if (!job) return null;
 
-    const ok = await dispatchWithRetry(job, transport, {
+    // Resolve the seller-facing brief (Option C) in-memory and attach it to the job we dispatch, so the
+    // transport can carry it in the envelope. Dispatch is one-shot (the keeper only polls/expires, never
+    // re-dispatches), so the brief needs no persistence. A missing task ⇒ no brief (the seller is only a
+    // reference agent that needs it; a bare dispatch still works for a canned seller).
+    const task = await getTask(job.workId);
+    const jobForDispatch = task ? { ...job, brief: buildSellerBrief(task) } : job;
+
+    const ok = await dispatchWithRetry(jobForDispatch, transport, {
       recordDispatchAttempt: store.recordDispatchAttempt,
       sleep: deps.dispatch.sleep,
       maxAttempts: deps.dispatch.maxAttempts,
