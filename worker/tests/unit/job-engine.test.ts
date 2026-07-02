@@ -136,6 +136,14 @@ describe('job-engine — onDelivery', () => {
     expect(row.lastError).toMatch(/settle|confirm/i);
   });
 
+  it('refuses a delivery that arrives after the deadline (defers to no-show expiry; transport-independent)', async () => {
+    const ctx = mkEngine({ now: () => Date.now() });
+    await ctx.engine.startJob({ ...createInput, deadline: new Date(Date.now() - 1000) }); // already past
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    expect(ctx.verify).not.toHaveBeenCalled();
+    expect(ctx.store.rows.get('j1')!.state).toBe('AWAITING_DELIVERY'); // untouched; keeper will expire it
+  });
+
   it('does not verify or settle when the artifact never materializes (fetchResult null)', async () => {
     const transport: SellerTransport = { dispatch: vi.fn().mockResolvedValue(undefined), fetchResult: vi.fn().mockResolvedValue(null) };
     const ctx = await deliveredJob({ transport });
@@ -163,13 +171,18 @@ describe('job-engine — expireJob (no-show keeper)', () => {
     expect(ctx.refundExpiredOnChain).not.toHaveBeenCalled();
   });
 
-  it('refuses to expire a terminal job (no double-settle)', async () => {
+  it('refuses to expire a terminal job (no double-settle), deadline-independently', async () => {
+    // Settle within the deadline (onDelivery declines past-deadline deliveries), then prove expire
+    // refuses — the isTerminal guard fires regardless of the deadline, so a SETTLED job is never
+    // double-settled by the keeper even after its deadline lapses.
     const ctx = mkEngine();
-    await ctx.engine.startJob({ ...createInput, deadline: new Date(Date.now() - 1000) });
+    await ctx.engine.startJob(createInput); // future deadline
     await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact }); // → SETTLED
+    expect(ctx.store.rows.get('j1')!.state).toBe('SETTLED');
     ctx.refundExpiredOnChain.mockClear();
     const r = await ctx.engine.expireJob('j1');
     expect(r.expired).toBe(false);
+    expect(r.reason).toMatch(/already/i);
     expect(ctx.refundExpiredOnChain).not.toHaveBeenCalled();
   });
 });
