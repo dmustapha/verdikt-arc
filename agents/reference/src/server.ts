@@ -3,6 +3,8 @@ import { mountWebhookSeller } from './lib/seller.js';
 import type { SellerSkill } from './lib/seller.js';
 import { Brain } from './lib/brain.js';
 import { researchSkill } from './skills/research.js';
+import { dataTransformSkill } from './skills/data-transform.js';
+import { codeSkill } from './skills/code.js';
 
 // The reference-seller service. Hosts the Claude-powered reference sellers that implement the Verdikt
 // standard (signed-webhook dispatch + A2A discovery card), each mounted at its own /:id path so one
@@ -11,8 +13,7 @@ import { researchSkill } from './skills/research.js';
 
 export function buildSkills(): SellerSkill[] {
   const brain = new Brain('reference');
-  return [researchSkill(brain)];
-  // WS5.5 adds data-transform (schema route); WS5.6 adds code (sandbox route).
+  return [researchSkill(brain), dataTransformSkill(brain), codeSkill(brain)];
 }
 
 export function buildApp(skills: SellerSkill[]): express.Express {
