@@ -1,13 +1,9 @@
-import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
 import type { Acceptance, Artifact, EvidenceBundle, EvidenceItem, SchemaField } from '../types.js';
+import { ajv } from '../lib/json-schema.js';
 
 function evItem(id: string, label: string, passed: boolean, detail: string): EvidenceItem {
   return { id: `schema:${id}`, kind: 'schema_check', label, status: passed ? 'pass' : 'fail', detail };
 }
-
-// One shared ajv with formats enabled (E1: format assertion is opt-in under draft 2020-12).
-const ajv = addFormats(new Ajv2020({ allErrors: true, strict: false }));
 
 // Validate a single value against a one-off {type, format, pattern, enum} schema via ajv. Returns a
 // human violation string or null. Lets the simple SchemaField map gain real format/pattern checks.

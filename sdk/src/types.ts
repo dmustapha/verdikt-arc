@@ -1,7 +1,7 @@
 // Public SDK types. Kept deliberately small and mirrored from the worker contract so an integrating
 // agent depends only on @verdikt/sdk, never on the worker internals.
 
-export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution';
+export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution' | 'tool_trace';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
 export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
@@ -16,8 +16,15 @@ export interface ExecutionCriteria {
   log?: { topic0: string; address?: string; topics?: (string | null)[] };
 }
 
-// What the PAYER commits to up front. Exactly one of tests / schema / sources / execution is
-// meaningful per type.
+// tool_trace route: a declared tool-call schema the self-reported trace must conform to. Verifies the
+// claimed trace's shape, not that the tool executed.
+export interface ToolTraceCriteria {
+  jsonSchema: Record<string, unknown>;
+  perCall?: boolean;
+}
+
+// What the PAYER commits to up front. Exactly one of tests / schema / sources / execution / toolTrace
+// is meaningful per type.
 export interface Acceptance {
   spec: string;
   tests?: string;                              // code route: payer pytest file contents
@@ -25,6 +32,7 @@ export interface Acceptance {
   minResponseBytes?: number;                    // tool_output route
   sources?: string;                             // answer route: payer source text
   execution?: ExecutionCriteria;                // execution route: on-chain effect to verify
+  toolTrace?: ToolTraceCriteria;                // tool_trace route: declared tool schema
 }
 
 export interface SchemaField {
