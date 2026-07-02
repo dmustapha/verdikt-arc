@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { EvidenceBundle, VerdictResult, VerdictLabel } from '../types.js';
 import { VERDICT_CODE } from '../types.js';
+import { confidenceToScore } from '../settlement/tiers.js';
 import { hashEvidence } from '../lib/hash.js';
 
 const MODEL = process.env.REASONER_MODEL ?? 'claude-sonnet-4-6';
@@ -12,7 +13,13 @@ const VERDICT_TOOL = {
     type: 'object' as const,
     properties: {
       verdict: { type: 'string', enum: ['pass', 'fail', 'partial', 'abstain'] },
-      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      confidence: {
+        type: 'number', minimum: 0, maximum: 1,
+        description:
+          'For pass/fail/abstain: your confidence in the verdict. For "partial": the FRACTION of the ' +
+          'bounty the delivered work has genuinely earned (0=nothing, 1=all) — this value directly ' +
+          'sizes the on-chain payment split, so set it to the fair share, not your certainty.',
+      },
       cited_evidence: { type: 'array', items: { type: 'string' }, description: 'evidence ids from the bundle' },
       rationale: { type: 'string' },
       abstain_reason: { type: 'string' },
@@ -29,6 +36,9 @@ const SYSTEM =
   '(2) NEVER pass if the bundle has a routeError. ' +
   '(3) Abstain when evidence is missing, contradictory, or insufficient to be confident. ' +
   '(4) Conservative-on-pass: when unsure between pass and anything else, do not pass. ' +
+  '(5) Use "partial" ONLY when the work is genuinely partially acceptable (some deliverables met, ' +
+  'others not) — and set confidence to the fraction of the bounty that share is worth, since it ' +
+  'directly sizes the on-chain split. If nothing is acceptable, fail; if you cannot tell, abstain. ' +
   'Cite the exact evidence ids you used.';
 
 function deterministicFloor(bundle: EvidenceBundle): VerdictLabel | null {
@@ -47,7 +57,7 @@ export async function reasonOverEvidence(bundle: EvidenceBundle): Promise<Verdic
   const floor = deterministicFloor(bundle);
 
   const base = (verdict: VerdictLabel, cited: string[], rationale: string, confidence: number, abstainReason?: string): VerdictResult => ({
-    verdict, confidence, citedEvidence: cited, rationale, abstainReason,
+    verdict, confidence, score: confidenceToScore(confidence), citedEvidence: cited, rationale, abstainReason,
     route: bundle.route, evidenceHash, verdictCode: VERDICT_CODE[verdict],
   });
 

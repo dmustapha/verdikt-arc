@@ -3,7 +3,7 @@
 
 export type ArtifactType = 'code' | 'tool_output' | 'answer';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
-export type Outcome = 'release' | 'refund' | 'abstain';
+export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
 // What the PAYER commits to up front. Exactly one of tests / schema / sources is meaningful per type.
 export interface Acceptance {
@@ -50,12 +50,13 @@ export interface SignedTaskOffer {
 
 // The terminal result of a verdict run, surfaced as a typed union the caller switches on.
 export interface VerdictResult {
-  status: 'released' | 'refunded' | 'abstained';
+  status: 'released' | 'refunded' | 'abstained' | 'partial';
   verdict: VerdictLabel;
   outcome: Outcome;
   workId: `0x${string}`;
   settlementTx: string | null;
   feeUsdc: number;            // what the seller was actually charged (0 on abstain)
+  bps?: number;               // on a partial split: the worker's share in basis points (1..9999)
   evidenceHash?: `0x${string}`;
 }
 

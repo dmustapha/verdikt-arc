@@ -2,12 +2,13 @@
 
 export type ArtifactType = 'code' | 'tool_output' | 'answer';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
-export type Outcome = 'release' | 'refund' | 'abstain';
+export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
 // verdictCode (on-chain uint8): pass=0 fail=1 partial=2 abstain=3
 export const VERDICT_CODE: Record<VerdictLabel, number> = { pass: 0, fail: 1, partial: 2, abstain: 3 };
-// outcome (on-chain uint8): release=0 refund=1 abstain-default=2
-export const OUTCOME_CODE: Record<Outcome, number> = { release: 0, refund: 1, abstain: 2 };
+// outcome (on-chain uint8): release=0 refund=1 abstain-default=2 partial=3
+// (partial is a real bps split — worker gets bounty*bps/1e4, payer keeps the remainder; WS2.)
+export const OUTCOME_CODE: Record<Outcome, number> = { release: 0, refund: 1, abstain: 2, partial: 3 };
 
 // ── Payer criteria (travels with the escrowed task) ──────────────────────────
 export interface SchemaField {
@@ -68,6 +69,7 @@ export interface EvidenceBundle {
 export interface VerdictResult {
   verdict: VerdictLabel;
   confidence: number;                        // 0..1
+  score?: number;                            // 0..100 tier signal = round(confidence*100); sizes partial bps
   citedEvidence: string[];                   // ids from the bundle
   rationale: string;
   abstainReason?: string;
@@ -83,6 +85,7 @@ export interface Settlement {
   evidenceHash: `0x${string}`;
   txHash: string;
   circleTxId: string;
+  bps?: number;                              // set on a partial settlement (worker's share, 1..9999)
 }
 
 export interface SignedReceipt {

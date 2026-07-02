@@ -303,7 +303,7 @@ class SellerApi {
     // Stream the verdict steps to the caller (the same SSE the courtroom watches), if requested.
     const stopStream = params.onStep ? this.vk._streamSteps(offer.workId, params.onStep) : undefined;
 
-    let data: { workId: `0x${string}`; verdict: string; outcome: string; txHash: string | null; feeUsdc?: number };
+    let data: { workId: `0x${string}`; verdict: string; outcome: string; txHash: string | null; bps?: number; feeUsdc?: number };
     try {
       data = (await this.vk._gateway.pay<typeof data>(`${this.vk._endpoint}/api/verdict`, { method: 'POST', body })).data;
     } catch (err) {
@@ -318,10 +318,13 @@ class SellerApi {
     }
 
     const outcome = data.outcome as VerdictResult['outcome'];
-    const status = outcome === 'release' ? 'released' : outcome === 'refund' ? 'refunded' : 'abstained';
+    const status: VerdictResult['status'] = outcome === 'release' ? 'released'
+      : outcome === 'refund' ? 'refunded'
+      : outcome === 'partial' ? 'partial'
+      : 'abstained';
     return {
       status, verdict: data.verdict as VerdictResult['verdict'], outcome,
-      workId: data.workId, settlementTx: data.txHash ?? null, feeUsdc: data.feeUsdc ?? 0,
+      workId: data.workId, settlementTx: data.txHash ?? null, feeUsdc: data.feeUsdc ?? 0, bps: data.bps,
     };
   }
 }

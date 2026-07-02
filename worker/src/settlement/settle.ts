@@ -1,35 +1,40 @@
 import type { VerdictResult, Settlement, Outcome } from '../types.js';
 import { executeContractCall, waitForTxHash } from '../lib/circle-wallets.js';
-import { SETTLE_FN_SIGNATURE } from './escrow-abi.js';
+import { SETTLE_FN_SIGNATURE, SETTLE_PARTIAL_FN_SIGNATURE } from './escrow-abi.js';
+import { planSettlement, outcomeForAction } from './tiers.js';
 
-// pass → release(worker); fail|partial → refund(payer); abstain → abstain-default(payer).
+// The off-chain Outcome for a verdict (release / refund / abstain / partial). Derived from the SAME
+// planSettlement() the on-chain call uses, so the DB/SSE label can never disagree with what settled.
 export function outcomeFor(v: VerdictResult): Outcome {
-  if (v.verdict === 'pass') return 'release';
-  if (v.verdict === 'abstain') return 'abstain';
-  return 'refund'; // fail | partial
+  return outcomeForAction(planSettlement(v));
 }
 
-// v5 settle() REJECTS verdictCode==2 (partial) — that path must go through settlePartial() with a
-// real bps split. Until the confidence->bps tier is wired (WS2), a 'partial' verdict is settled via
-// settle() as a refund (code 1) so the buyer is made whole and the tx never reverts. This matches v4
-// behavior and outcomeFor()'s partial->refund. WS2 replaces this with a settlePartial() call.
-export function onChainSettleCode(verdictCode: number): number {
-  return verdictCode === 2 ? 1 : verdictCode;
+// The bps a partial verdict settles at (0 for a non-partial). Surfaced to the SSE/SDK/UI.
+export function bpsFor(v: VerdictResult): number {
+  const a = planSettlement(v);
+  return a.kind === 'settlePartial' ? a.bps : 0;
 }
 
 export async function settleVerdict(workId: `0x${string}`, v: VerdictResult): Promise<Settlement> {
-  const outcome = outcomeFor(v);
   const escrow = process.env.ESCROW_ADDRESS!;
+  const action = planSettlement(v);
+  const outcome = outcomeForAction(action);
 
-  // M-3: outcome is derived on-chain from verdictCode — we no longer pass it. outcomeFor() is kept
-  // only for the off-chain Settlement record / DB / SSE display, and MUST agree with the contract's
-  // derivation (pass->release, abstain->abstain, fail->refund). onChainSettleCode() guards the v5
-  // partial-code rejection (see its doc comment).
-  const circleTxId = await executeContractCall({
-    contractAddress: escrow,
-    abiFunctionSignature: SETTLE_FN_SIGNATURE, // settle(bytes32,uint8,bytes32)
-    abiParameters: [workId, onChainSettleCode(v.verdictCode), v.evidenceHash],
-  });
+  // Confidence tiers → the on-chain call. pass/fail/abstain → settle(bytes32,uint8,bytes32); a
+  // `partial` verdict → settlePartial(bytes32,uint16,bytes32) with a real, clamped bps split. v5
+  // settle() REJECTS verdictCode==2 by design, so a partial is NEVER sent to settle() — the routing
+  // in planSettlement() guarantees it. (WS2 retired the interim onChainSettleCode() downgrade.)
+  const circleTxId = action.kind === 'settlePartial'
+    ? await executeContractCall({
+        contractAddress: escrow,
+        abiFunctionSignature: SETTLE_PARTIAL_FN_SIGNATURE,
+        abiParameters: [workId, action.bps, v.evidenceHash],
+      })
+    : await executeContractCall({
+        contractAddress: escrow,
+        abiFunctionSignature: SETTLE_FN_SIGNATURE,
+        abiParameters: [workId, action.code, v.evidenceHash],
+      });
 
   const txHash = await waitForTxHash(circleTxId);
   if (!txHash) {
@@ -37,5 +42,6 @@ export async function settleVerdict(workId: `0x${string}`, v: VerdictResult): Pr
     throw new Error(`settlement did not confirm (circleTxId=${circleTxId})`);
   }
 
-  return { workId, outcome, verdictCode: v.verdictCode, evidenceHash: v.evidenceHash, txHash, circleTxId };
+  const bps = action.kind === 'settlePartial' ? action.bps : undefined;
+  return { workId, outcome, verdictCode: v.verdictCode, evidenceHash: v.evidenceHash, txHash, circleTxId, bps };
 }

@@ -13,6 +13,7 @@ export interface VerdictRunResult {
   verdict: VerdictResult;
   outcome: string;
   txHash: string | null;
+  bps?: number;            // worker's share on a partial settlement (1..9999); undefined otherwise
   error?: string;
 }
 
@@ -50,14 +51,14 @@ export async function runVerdict(task: Task, artifact: Artifact): Promise<Verdic
   try {
     const settlement = await settleVerdict(workId, verdict);
     await recordSettled(workId, settlement.outcome, settlement.txHash);
-    sseBus.publish(workId, 'settled', { outcome: settlement.outcome, txHash: settlement.txHash });
+    sseBus.publish(workId, 'settled', { outcome: settlement.outcome, txHash: settlement.txHash, bps: settlement.bps });
 
     // 4. Receipt
     const receipt = await buildReceipt(settlement, verdict, task.amountUsdc);
     await recordReceipt(workId, receipt);
     sseBus.publish(workId, 'receipt', receipt);
 
-    return { verdict, outcome: settlement.outcome, txHash: settlement.txHash };
+    return { verdict, outcome: settlement.outcome, txHash: settlement.txHash, bps: settlement.bps };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await recordSettleFailed(workId, msg).catch(() => {}); // keep DB honest; never mask the original error
