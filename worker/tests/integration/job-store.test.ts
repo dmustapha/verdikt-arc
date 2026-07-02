@@ -142,6 +142,18 @@ describe('job-store — jti dedupe + listByState', () => {
     expect(await recordSeenJti(jti, job)).toBe(false); // replay
   });
 
+  it('scopes jti dedupe per-job — the same jti value on two jobs does not collide', async () => {
+    const workA = mkWork('jtiA'); const jobA = `job-${suffix}-jtiA`; ids.push({ work: workA, job: jobA });
+    const workB = mkWork('jtiB'); const jobB = `job-${suffix}-jtiB`; ids.push({ work: workB, job: jobB });
+    await seedTask(workA); await seedTask(workB);
+    await createJob({ jobId: jobA, workId: workA, sellerUrl: 'https://s/x', sellerProtocol: 'webhook', callbackToken: 't', resultRef: null, deadline });
+    await createJob({ jobId: jobB, workId: workB, sellerUrl: 'https://s/x', sellerProtocol: 'webhook', callbackToken: 't', resultRef: null, deadline });
+    const shared = `counter-1-${suffix}`;
+    expect(await recordSeenJti(shared, jobA)).toBe(true);
+    expect(await recordSeenJti(shared, jobB)).toBe(true);  // different job — NOT a replay
+    expect(await recordSeenJti(shared, jobA)).toBe(false); // same job — replay
+  });
+
   it('listByState returns jobs in the requested states', async () => {
     const work = mkWork('list'); const job = `job-${suffix}-list`; ids.push({ work, job });
     await seedTask(work);

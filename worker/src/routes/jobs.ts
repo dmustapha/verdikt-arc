@@ -16,6 +16,9 @@ const PROTOCOLS: SellerProtocol[] = ['webhook', 'a2a', 'x402'];
 
 const JOBS_PER_IP = Number(process.env.JOBS_PER_IP ?? 20);
 const rateLimit = createRateLimiter({ perIp: JOBS_PER_IP, ipWindowMs: 10 * 60 * 1000 });
+// /expire is unauthenticated (it only ever refunds the buyer), but each call is a DB read + a possible
+// on-chain tx — rate-limit per IP so it can't be used to spam doomed refundExpired attempts.
+const expireRateLimit = createRateLimiter({ perIp: Number(process.env.EXPIRE_PER_IP ?? 30), ipWindowMs: 10 * 60 * 1000 });
 
 // POST /api/jobs — start the async lifecycle for an ALREADY-FUNDED escrow. The escrow must be funded
 // on-chain (the payer funds it separately via EIP-3009) and its task registered via /api/tasks; this
@@ -101,6 +104,8 @@ jobsRouter.get('/api/jobs/:id', async (req, res) => {
 // POST /api/jobs/:id/expire — manual keeper trigger. Only refunds the buyer, and only past the
 // deadline for a non-terminal job (the engine + contract both guard). Safe to expose.
 jobsRouter.post('/api/jobs/:id/expire', async (req, res) => {
+  const limited = expireRateLimit(clientIp(req), Date.now());
+  if (limited) { res.status(429).json({ error: limited }); return; }
   try {
     const r = await engine.expireJob(req.params.id);
     res.status(r.expired ? 200 : 409).json(r);

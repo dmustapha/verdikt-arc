@@ -138,8 +138,13 @@ export async function recordJobError(jobId: string, error: string): Promise<void
   await sql`UPDATE vk_jobs SET last_error = ${error}, updated_at = now() WHERE job_id = ${jobId}`;
 }
 
-// Atomic jti dedupe: INSERT wins once; a replayed jti hits the PK conflict → 0 rows → false.
+// Atomic jti dedupe, SCOPED PER-JOB. The stored key is `${jobId}::${jti}` so two independent sellers
+// that reuse a non-globally-unique jti value (e.g. a per-seller counter) don't collide — each job has
+// its own replay namespace. This never weakens cross-job protection: a callback is also gated by the
+// per-job callback token, so a jti lifted from job A is rejected at job B on the token check regardless.
+// Composite key in the existing TEXT PK avoids a schema migration. INSERT wins once; a replay → 0 rows.
 export async function recordSeenJti(jti: string, jobId: string): Promise<boolean> {
-  const r = await sql`INSERT INTO vk_seen_jti (jti, job_id) VALUES (${jti}, ${jobId}) ON CONFLICT (jti) DO NOTHING`;
+  const key = `${jobId}::${jti}`;
+  const r = await sql`INSERT INTO vk_seen_jti (jti, job_id) VALUES (${key}, ${jobId}) ON CONFLICT (jti) DO NOTHING`;
   return r.rowCount === 1;
 }
