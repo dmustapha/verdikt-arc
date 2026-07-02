@@ -96,12 +96,14 @@ export async function markAwaiting(jobId: string): Promise<boolean> {
   return r.rowCount === 1;
 }
 
-// Single-shot delivery lock: only the FIRST callback/poll for a dispatched-or-awaiting job wins and
-// stores the artifact. A duplicate delivery updates 0 rows → false → idempotent no-op upstream.
+// Single-shot delivery lock: only the FIRST callback/poll for a pre-delivery job wins and stores the
+// artifact. FUNDED is accepted because a very fast token-authed callback can beat the DISPATCHED write
+// (the token proves the seller was dispatched to). A duplicate delivery updates 0 rows → false →
+// idempotent no-op upstream.
 export async function claimDelivery(jobId: string, artifact: Artifact): Promise<boolean> {
   const r = await sql`
     UPDATE vk_jobs SET state = 'DELIVERED', artifact = ${JSON.stringify(artifact)}, updated_at = now()
-    WHERE job_id = ${jobId} AND state IN ('DISPATCHED', 'AWAITING_DELIVERY')`;
+    WHERE job_id = ${jobId} AND state IN ('FUNDED', 'DISPATCHED', 'AWAITING_DELIVERY')`;
   return r.rowCount === 1;
 }
 

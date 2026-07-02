@@ -88,6 +88,15 @@ describe('job-store — atomic transitions', () => {
     expect(await claimDelivery(job, artifact)).toBe(false); // duplicate delivery rejected
   });
 
+  it('claimDelivery accepts a delivery straight from FUNDED (fast-callback race)', async () => {
+    const work = mkWork('fastcb'); const job = `job-${suffix}-fastcb`; ids.push({ work, job });
+    await seedTask(work);
+    await createJob({ jobId: job, workId: work, sellerUrl: 'https://s/x', sellerProtocol: 'webhook', callbackToken: 't', resultRef: null, deadline });
+    // No markDispatched — simulate a callback that beat the DISPATCHED write.
+    expect(await claimDelivery(job, artifact)).toBe(true);
+    expect((await getJob(job))!.state).toBe('DELIVERED');
+  });
+
   it('drives the full happy path to SETTLED', async () => {
     const work = mkWork('happy'); const job = `job-${suffix}-happy`; ids.push({ work, job });
     await seedTask(work);

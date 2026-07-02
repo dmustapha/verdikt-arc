@@ -46,6 +46,12 @@ describe('job-machine — happy-path transitions', () => {
   it('allows a fast webhook to jump DISPATCHED → DELIVERED', () => {
     expect(canTransition('DISPATCHED', 'DELIVERED')).toBe(true);
   });
+
+  it('allows a very fast callback to deliver straight from FUNDED (beat the DISPATCHED write)', () => {
+    // A valid token-authed callback proves the seller WAS dispatched to, even if we have not yet
+    // persisted the DISPATCHED transition — so a delivery may land while the job is still FUNDED.
+    expect(canTransition('FUNDED', 'DELIVERED')).toBe(true);
+  });
 });
 
 describe('job-machine — expiry from every non-terminal state', () => {
