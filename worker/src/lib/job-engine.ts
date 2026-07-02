@@ -83,6 +83,17 @@ export function makeEngine(deps: EngineDeps): JobEngine {
   }
 
   async function onDelivery(job: JobRow, delivery: Delivery): Promise<void> {
+    // No-show cutoff, enforced at the single choke point so it holds for EVERY transport (a webhook
+    // callback and a poll both flow through here). Past the deadline the buyer is entitled to a refund;
+    // a late delivery is declined and the keeper's expiry refunds them. Without this, a webhook that
+    // beat the keeper could still settle while a polled delivery (pollOnce skips past-deadline jobs)
+    // would not — transport-dependent behavior. The FUNDED-once contract remains the definitive guard
+    // for the residual race where the deadline lapses mid-verify.
+    if (now() >= job.deadline.getTime()) {
+      await store.recordJobError(job.jobId, 'delivery arrived after the deadline — deferring to no-show expiry');
+      return;
+    }
+
     // Resolve the AUTHORITATIVE artifact. webhook: inline (already validated at the callback).
     // a2a: re-fetch from the registered seller (the push was only a nudge). null ⇒ not ready → the
     // poller/keeper will retry; we leave the job untouched.
