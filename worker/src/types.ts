@@ -1,6 +1,6 @@
 // All shared worker types. Order: enums → contract/artifact → evidence → verdict → receipt → SSE.
 
-export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution';
+export type ArtifactType = 'code' | 'tool_output' | 'answer' | 'execution' | 'tool_trace';
 export type VerdictLabel = 'pass' | 'fail' | 'partial' | 'abstain';
 export type Outcome = 'release' | 'refund' | 'abstain' | 'partial';
 
@@ -44,6 +44,15 @@ export interface Acceptance {
   minResponseBytes?: number;                 // tool_output route
   sources?: string;                          // answer route: payer source text
   execution?: ExecutionCriteria;             // execution route: on-chain effect to verify
+  toolTrace?: ToolTraceCriteria;             // tool_trace route: declared tool schema the trace must match
+}
+
+// tool_trace route: a declared tool-call schema. The artifact is a self-reported tool-call trace;
+// the verifier checks it CONFORMS to this schema. Honest boundary: it verifies the claimed trace's
+// shape, not that the tool actually executed (pair with the execution route for ground truth).
+export interface ToolTraceCriteria {
+  jsonSchema: Record<string, unknown>;       // JSON Schema (draft 2020-12) for the trace, or one call if perCall
+  perCall?: boolean;                         // if true: payload is an array; each element validated against jsonSchema
 }
 
 export interface Task {

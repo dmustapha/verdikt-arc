@@ -4,7 +4,7 @@ import { runVerdict } from '../engine/orchestrator.js';
 import { fundEscrow } from '../settlement/fund-escrow.js';
 import { sseBus } from '../lib/sse-bus.js';
 import { createRateLimiter, clientIp } from '../lib/rate-limit.js';
-import type { Artifact, Acceptance, ArtifactType, ExecutionCriteria } from '../types.js';
+import type { Artifact, Acceptance, ArtifactType, ExecutionCriteria, ToolTraceCriteria } from '../types.js';
 
 export const tryRouter = Router();
 
@@ -36,6 +36,7 @@ const SPEC: Record<ArtifactType, string> = {
   tool_output: 'matches the payer JSON contract',
   answer: 'answer grounded in the payer sources',
   execution: 'the claimed on-chain transaction satisfies the payer criteria',
+  tool_trace: 'the claimed tool-call trace conforms to the declared tool schema',
 };
 
 // Build a validated Acceptance + Artifact for the chosen route, or return an error string.
@@ -80,6 +81,18 @@ export function buildTask(route: ArtifactType, body: Record<string, unknown>): {
     return { acceptance: { spec: SPEC.execution, execution: exec as unknown as ExecutionCriteria }, artifact: { type: 'execution', payload } };
   }
 
+  if (route === 'tool_trace') {
+    const tt = accIn.toolTrace as Record<string, unknown> | undefined;
+    const jsonSchema = tt?.jsonSchema as Record<string, unknown> | undefined;
+    if (!tt || typeof tt !== 'object' || !jsonSchema || typeof jsonSchema !== 'object' || Object.keys(jsonSchema).length === 0) {
+      return 'tool_trace route requires acceptance.toolTrace.jsonSchema (the declared tool schema) — no schema, no verdict';
+    }
+    if (bytes(JSON.stringify(tt)) > MAX_FIELD_BYTES) return `acceptance.toolTrace exceeds ${MAX_FIELD_BYTES} bytes`;
+    const toolTrace: ToolTraceCriteria = { jsonSchema };
+    if (tt.perCall === true) toolTrace.perCall = true;
+    return { acceptance: { spec: SPEC.tool_trace, toolTrace }, artifact: { type: 'tool_trace', payload } };
+  }
+
   // answer
   const sources = accIn.sources;
   if (typeof sources !== 'string' || sources.trim() === '') return 'answer route requires acceptance.sources (the text claims must be grounded in) — no sources, no verdict';
@@ -88,7 +101,7 @@ export function buildTask(route: ArtifactType, body: Record<string, unknown>): {
 }
 
 const VALID_WORKID = /^0x[0-9a-fA-F]{64}$/;
-const ROUTES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution'];
+const ROUTES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution', 'tool_trace'];
 
 // POST /api/try  body: { workId, route, acceptance, artifact }
 tryRouter.post('/api/try', async (req, res) => {

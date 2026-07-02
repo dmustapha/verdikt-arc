@@ -7,7 +7,7 @@ import type { Task, Acceptance, ArtifactType } from '../types.js';
 
 export const tasksRouter = Router();
 
-const TYPES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution'];
+const TYPES: ArtifactType[] = ['code', 'tool_output', 'answer', 'execution', 'tool_trace'];
 
 // B3: /api/tasks is public and writes a DB row (no money moves). Rate-limit per IP so it can't be
 // spammed into DB bloat. Generous: a real payer registers a handful of tasks, not hundreds.
