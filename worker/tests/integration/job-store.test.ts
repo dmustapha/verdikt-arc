@@ -33,11 +33,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  for (const { work, job } of ids) {
-    await sql`DELETE FROM vk_jobs WHERE job_id = ${job}`;
-    await sql`DELETE FROM vk_seen_jti WHERE job_id = ${job}`;
-    await sql`DELETE FROM vk_tasks WHERE work_id = ${work}`;
-  }
+  // Batch cleanup into 3 queries (not 3×N sequential round-trips) — cold Neon is seconds per query, so
+  // per-row deletes blow the afterAll hook timeout as the suite grows.
+  const jobs = `{${ids.map((i) => i.job).join(',')}}`;
+  const works = `{${ids.map((i) => i.work).join(',')}}`;
+  await sql`DELETE FROM vk_jobs WHERE job_id = ANY(${jobs}::text[])`;
+  await sql`DELETE FROM vk_seen_jti WHERE job_id = ANY(${jobs}::text[])`;
+  await sql`DELETE FROM vk_tasks WHERE work_id = ANY(${works}::text[])`;
 });
 
 describe('job-store — create + read', () => {

@@ -71,6 +71,26 @@ describe('x402Driver.dispatch — toll-only, reconciliation invariant', () => {
     expect(onResultRef).toHaveBeenCalledWith('j-x402', JOB_URL);
   });
 
+  it('when a seller offers several requirements, pays the CHEAPEST within cap (ignores a decoy over-cap ask)', async () => {
+    // 402 offering an over-cap decoy FIRST and a real sub-cent toll second — must pay the toll, not throw.
+    const state = { paidValue: null as string | null };
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(typeof input === 'string' ? input : input.href, init);
+      const paySig = req.headers.get('PAYMENT-SIGNATURE');
+      if (!paySig) {
+        const pr = { x402Version: 2, resource: { url: SELLER }, accepts: [
+          { scheme: 'exact', network: NETWORK, asset: USDC, amount: '5000000', payTo: PAY_TO, maxTimeoutSeconds: 120, extra: { name: 'USDC', version: '2' } },
+          { scheme: 'exact', network: NETWORK, asset: USDC, amount: '800', payTo: PAY_TO, maxTimeoutSeconds: 120, extra: { name: 'USDC', version: '2' } },
+        ] };
+        return new Response('', { status: 402, headers: { 'PAYMENT-REQUIRED': encodePaymentRequiredHeader(pr) } });
+      }
+      state.paidValue = (JSON.parse(Buffer.from(paySig, 'base64').toString('utf8')) as { payload: { authorization: { value: string } } }).payload.authorization.value;
+      return new Response(JSON.stringify({ jobUrl: JOB_URL }), { status: 202, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    await x402Driver(driverOpts(fetchFn)).dispatch(job());
+    expect(state.paidValue).toBe('800');
+  });
+
   it('REFUSES to pay when the 402 asks for more than the toll cap (the bounty) — nothing signed', async () => {
     const { fetchFn, state } = mockSeller('1000000'); // $1.00 — a bounty-sized ask
     await expect(x402Driver(driverOpts(fetchFn)).dispatch(job())).rejects.toThrow(/cap|toll/i);
