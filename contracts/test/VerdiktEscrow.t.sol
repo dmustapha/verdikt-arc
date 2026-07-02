@@ -19,7 +19,9 @@ contract VerdiktEscrowTest is Test {
     bytes constant SIG = hex"11111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222" hex"1b";
     bytes32 constant WORK_ID = keccak256("work-1");
     bytes32 constant EVIDENCE = keccak256("evidence-bundle");
-    uint256 constant AMT = 5_000000; // 5 USDC (6 decimals)
+    uint256 constant AMT = 5_000000; // 5 USDC (6 decimals) — total escrowed (bounty + fee)
+    uint256 constant FEE = 1_000000; // 1 USDC verdict fee; bounty = AMT - FEE = 4 USDC
+    uint256 constant TTL = 1 days; // no-show deadline horizon
 
     // Arc CCTP V2 TokenMessengerV2 address the escrow hardcodes for outbound payouts.
     address constant TOKEN_MESSENGER = 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA;
@@ -43,7 +45,19 @@ contract VerdiktEscrowTest is Test {
 
     function _fund() internal {
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, _local());
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    // Fund WORK_ID with an explicit verdict fee (local routes).
+    function _fundFee(uint256 fee) internal {
+        vm.prank(payer);
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, fee, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    // Fund WORK_ID with an explicit verdict fee AND cross-chain payout routes.
+    function _fundFeeRoutes(uint256 fee, VerdiktEscrow.PayoutRoutes memory r) internal {
+        vm.prank(payer);
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, fee, TTL, 0, type(uint256).max, SIG, r);
     }
 
     function testFundLocksUsdc() public {
@@ -60,7 +74,7 @@ contract VerdiktEscrowTest is Test {
         _fund();
         vm.prank(payer);
         vm.expectRevert("workId exists");
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, _local());
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, TTL, 0, type(uint256).max, SIG, _local());
     }
 
     function testSettleReleaseToWorker() public {
@@ -160,7 +174,7 @@ contract VerdiktEscrowTest is Test {
 
     function _fundCrossChain(uint256 amt) internal {
         vm.prank(hook);
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, amt, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, amt, 0, TTL, _local());
     }
 
     function testSetHookOnlyOwner() public {
@@ -190,14 +204,14 @@ contract VerdiktEscrowTest is Test {
         _setupHook(AMT);
         vm.prank(address(0xBAD));
         vm.expectRevert("not hook");
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, 0, TTL, _local());
     }
 
     // With no hook set, hook == address(0); no real caller can satisfy msg.sender == hook.
     function testFundCrossChainBeforeHookSetReverts() public {
         vm.prank(hook);
         vm.expectRevert("not hook");
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, 0, TTL, _local());
     }
 
     function testFundCrossChainWorkIdCollision() public {
@@ -205,7 +219,7 @@ contract VerdiktEscrowTest is Test {
         _fundCrossChain(AMT);
         vm.prank(hook);
         vm.expectRevert("workId exists");
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, 0, TTL, _local());
     }
 
     // A cross-chain-funded workId collides with a native EIP-3009-funded one too.
@@ -217,18 +231,18 @@ contract VerdiktEscrowTest is Test {
         MockUSDC(USDC).approve(address(escrow), AMT);
         vm.prank(hook);
         vm.expectRevert("workId exists");
-        escrow.fundCrossChain(WORK_ID, payer, worker, AMT, _local()); // same WORK_ID as _fund()
+        escrow.fundCrossChain(WORK_ID, payer, worker, AMT, 0, TTL, _local()); // same WORK_ID as _fund()
     }
 
     function testFundCrossChainZeroGuards() public {
         _setupHook(AMT);
         vm.startPrank(hook);
         vm.expectRevert("amount=0");
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, 0, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, 0, 0, TTL, _local());
         vm.expectRevert("worker=0");
-        escrow.fundCrossChain(WORK_ID_2, payer, address(0), AMT, _local());
+        escrow.fundCrossChain(WORK_ID_2, payer, address(0), AMT, 0, TTL, _local());
         vm.expectRevert("payer=0");
-        escrow.fundCrossChain(WORK_ID_2, address(0), worker, AMT, _local());
+        escrow.fundCrossChain(WORK_ID_2, address(0), worker, AMT, 0, TTL, _local());
         vm.stopPrank();
     }
 
@@ -278,7 +292,7 @@ contract VerdiktEscrowTest is Test {
 
     function _fundWithRoutes(VerdiktEscrow.PayoutRoutes memory r) internal {
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, r);
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, TTL, 0, type(uint256).max, SIG, r);
     }
 
     // RELEASE pays the seller OUT to Base (domain 6) via CCTP — no local Arc transfer.
@@ -340,10 +354,256 @@ contract VerdiktEscrowTest is Test {
         vm.prank(hook);
         MockUSDC(USDC).approve(address(escrow), AMT);
         vm.prank(hook);
-        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, VerdiktEscrow.PayoutRoutes(6, sellerOnBase, 0, bytes32(0)));
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, 0, TTL, VerdiktEscrow.PayoutRoutes(6, sellerOnBase, 0, bytes32(0)));
 
         vm.prank(verdictWallet);
         escrow.settle(WORK_ID_2, 0, EVIDENCE);
         assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastRecipient(), sellerOnBase, "in-and-out cross-chain");
+    }
+
+    // ===== v5: fee-in-escrow, deadline / no-show, real partial split =====
+
+    // feeRecipient defaults to the deployer (this test contract). bounty = AMT - FEE.
+    address internal feeRecipient = address(this);
+
+    event SettledPartial(
+        bytes32 indexed workId, address workerTo, uint256 workerAmount,
+        address payerTo, uint256 payerAmount, uint16 bps, bytes32 evidenceHash
+    );
+    event Expired(bytes32 indexed workId, address to, uint256 amount);
+    event FeePaid(bytes32 indexed workId, address to, uint256 amount);
+
+    // --- fee split on the three settle outcomes ---
+
+    function testFeeSplitOnRelease() public {
+        _fundFee(FEE);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE); // pass -> release
+        assertEq(MockUSDC(USDC).balanceOf(worker), AMT - FEE, "worker gets bounty only");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore + FEE, "Verdikt earns the fee");
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), 0, "escrow fully drained");
+    }
+
+    function testFeeSplitOnRefund() public {
+        _fundFee(FEE);
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 1, EVIDENCE); // fail -> refund
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + (AMT - FEE), "payer gets bounty back");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore + FEE, "Verdikt earns fee (verdict rendered)");
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), 0, "escrow fully drained");
+    }
+
+    function testAbstainRefundsFullNoFee() public {
+        _fundFee(FEE);
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 3, EVIDENCE); // abstain -> full refund, no fee
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + AMT, "payer refunded in full (bounty + fee)");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore, "no fee taken on abstain");
+    }
+
+    // --- settlePartial: real bps split + guards ---
+
+    function testSettlePartialBpsMath() public {
+        _fundFee(FEE);
+        uint256 bounty = AMT - FEE; // 4 USDC
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+        vm.prank(verdictWallet);
+        escrow.settlePartial(WORK_ID, 2500, EVIDENCE); // 25% to worker
+        uint256 workerCut = bounty * 2500 / 10_000; // 1 USDC
+        assertEq(MockUSDC(USDC).balanceOf(worker), workerCut, "worker gets 25% of bounty");
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + (bounty - workerCut), "payer gets remainder");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore + FEE, "Verdikt earns fee on partial");
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), 0, "escrow fully drained");
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.status, 2);
+        assertEq(e.outcome, 3, "OUTCOME_PARTIAL");
+        assertEq(e.verdictCode, 2);
+    }
+
+    function testSettlePartialEmitsEvent() public {
+        _fundFee(FEE);
+        uint256 bounty = AMT - FEE;
+        uint256 workerCut = bounty * 4000 / 10_000;
+        vm.expectEmit(true, false, false, true);
+        emit SettledPartial(WORK_ID, worker, workerCut, payer, bounty - workerCut, 4000, EVIDENCE);
+        vm.prank(verdictWallet);
+        escrow.settlePartial(WORK_ID, 4000, EVIDENCE);
+    }
+
+    function testSettlePartialRejectsZeroBps() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        vm.expectRevert("bps out of range");
+        escrow.settlePartial(WORK_ID, 0, EVIDENCE);
+    }
+
+    function testSettlePartialRejectsFullBps() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        vm.expectRevert("bps out of range");
+        escrow.settlePartial(WORK_ID, 10_000, EVIDENCE);
+    }
+
+    function testSettlePartialRejectsOverBps() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        vm.expectRevert("bps out of range");
+        escrow.settlePartial(WORK_ID, 10_001, EVIDENCE);
+    }
+
+    function testSettlePartialOnlyVerdict() public {
+        _fundFee(FEE);
+        vm.prank(attacker());
+        vm.expectRevert("not verdict");
+        escrow.settlePartial(WORK_ID, 5000, EVIDENCE);
+    }
+
+    function testSettlePartialOnlyFunded() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
+        vm.prank(verdictWallet);
+        vm.expectRevert("not funded");
+        escrow.settlePartial(WORK_ID, 5000, EVIDENCE);
+    }
+
+    // settle() must reject the partial verdict code — it has to route through settlePartial.
+    function testSettleRejectsPartialCode() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        vm.expectRevert("use settlePartial");
+        escrow.settle(WORK_ID, 2, EVIDENCE);
+    }
+
+    // Partial with a cross-chain worker route: the worker cut is burned via CCTP; remainder + fee local.
+    function testSettlePartialCrossChainWorkerCut() public {
+        bytes32 sellerOnBase = bytes32(uint256(uint160(address(0xBA5E))));
+        _fundFeeRoutes(FEE, VerdiktEscrow.PayoutRoutes(6, sellerOnBase, 0, bytes32(0)));
+        uint256 bounty = AMT - FEE;
+        uint256 workerCut = bounty * 2500 / 10_000;
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+
+        vm.prank(verdictWallet);
+        escrow.settlePartial(WORK_ID, 2500, EVIDENCE);
+
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastDomain(), 6, "worker cut burned to Base");
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastRecipient(), sellerOnBase);
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastAmount(), workerCut, "burned exactly the worker cut");
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + (bounty - workerCut), "payer remainder local");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore + FEE, "fee local");
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), 0, "escrow fully drained");
+    }
+
+    // --- refundExpired: no-show refund ---
+
+    function testDeadlineSetAtFund() public {
+        _fundFee(FEE);
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.deadline, block.timestamp + TTL, "deadline = fundedAt + ttl");
+        assertEq(e.fee, FEE, "fee stored");
+    }
+
+    function testRefundExpiredBeforeDeadlineReverts() public {
+        _fundFee(FEE);
+        vm.expectRevert("not expired");
+        escrow.refundExpired(WORK_ID); // permissionless, but too early
+    }
+
+    function testRefundExpiredAfterDeadlinePermissionless() public {
+        _fundFee(FEE);
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
+        vm.warp(block.timestamp + TTL + 1);
+        // A random third party (not payer/verdict/owner) can trigger the no-show refund.
+        vm.prank(attacker());
+        escrow.refundExpired(WORK_ID);
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + AMT, "buyer refunded in full (bounty + fee)");
+        assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore, "no fee on no-show");
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.status, 2);
+        assertEq(e.outcome, 4, "OUTCOME_EXPIRED");
+        assertEq(escrow.totalEscrowed(), 0, "accounting cleared");
+    }
+
+    function testRefundExpiredEmitsEvent() public {
+        _fundFee(FEE);
+        vm.warp(block.timestamp + TTL + 1);
+        vm.expectEmit(true, false, false, true);
+        emit Expired(WORK_ID, payer, AMT);
+        escrow.refundExpired(WORK_ID);
+    }
+
+    function testRefundExpiredOnlyFunded() public {
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
+        vm.warp(block.timestamp + TTL + 1);
+        vm.expectRevert("not funded");
+        escrow.refundExpired(WORK_ID);
+    }
+
+    function testRefundExpiredCrossChainToPayer() public {
+        bytes32 buyerOnEth = bytes32(uint256(uint160(address(0xE74))));
+        _fundFeeRoutes(FEE, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, buyerOnEth));
+        vm.warp(block.timestamp + TTL + 1);
+        escrow.refundExpired(WORK_ID);
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastDomain(), 0, "refunded to Ethereum");
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastRecipient(), buyerOnEth);
+        assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastAmount(), AMT, "full bounty + fee refunded on no-show");
+    }
+
+    // --- fund guards for the new fields ---
+
+    function testFundRejectsFeeGteAmount() public {
+        vm.prank(payer);
+        vm.expectRevert("fee>=amount");
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, AMT, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    function testFundRejectsZeroTtl() public {
+        vm.prank(payer);
+        vm.expectRevert("ttl=0");
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, FEE, 0, 0, type(uint256).max, SIG, _local());
+    }
+
+    function testFundCrossChainRejectsFeeGteAmount() public {
+        _setupHook(AMT);
+        vm.prank(hook);
+        vm.expectRevert("fee>=amount");
+        escrow.fundCrossChain(WORK_ID_2, payer, worker, AMT, AMT, TTL, _local());
+    }
+
+    // --- feeRecipient rotation ---
+
+    function testSetFeeRecipient() public {
+        address treasury = address(0xFEE);
+        escrow.setFeeRecipient(treasury);
+        assertEq(escrow.feeRecipient(), treasury);
+        _fundFee(FEE);
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE);
+        assertEq(MockUSDC(USDC).balanceOf(treasury), FEE, "rotated treasury receives the fee");
+    }
+
+    function testSetFeeRecipientOnlyOwner() public {
+        vm.prank(attacker());
+        vm.expectRevert("not owner");
+        escrow.setFeeRecipient(address(0xFEE));
+    }
+
+    function testSetFeeRecipientRejectsZero() public {
+        vm.expectRevert("feeRecipient=0");
+        escrow.setFeeRecipient(address(0));
+    }
+
+    function attacker() internal pure returns (address) {
+        return address(0xBAD5);
     }
 }

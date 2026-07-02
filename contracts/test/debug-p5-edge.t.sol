@@ -125,7 +125,7 @@ contract VerdiktEscrowEdgeTest is Test {
 
     function _fund() internal {
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     // ---------------------------------------------------------------
@@ -142,13 +142,13 @@ contract VerdiktEscrowEdgeTest is Test {
     function testFundZeroAmountReverts() public {
         vm.prank(payer);
         vm.expectRevert("amount=0");
-        escrow.fundWithAuthorization(WORK_ID, worker, 0, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, worker, 0, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     function testFundZeroWorkerReverts() public {
         vm.prank(payer);
         vm.expectRevert("worker=0");
-        escrow.fundWithAuthorization(WORK_ID, address(0), AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, address(0), AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     // Different worker on the same workId after a fund -> "workId exists" (double-fund variant).
@@ -156,7 +156,7 @@ contract VerdiktEscrowEdgeTest is Test {
         _fund();
         vm.prank(payer);
         vm.expectRevert("workId exists");
-        escrow.fundWithAuthorization(WORK_ID, attacker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, attacker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     // Double-fund variant: a DIFFERENT payer cannot overwrite an existing funded workId.
@@ -165,14 +165,14 @@ contract VerdiktEscrowEdgeTest is Test {
         MockUSDC(USDC).mint(attacker, AMT);
         vm.prank(attacker);
         vm.expectRevert("workId exists");
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     // The funder always becomes the payer of record (from = msg.sender, not a param).
     function testFunderBecomesPayerOfRecord() public {
         MockUSDC(USDC).mint(attacker, AMT);
         vm.prank(attacker);
-        escrow.fundWithAuthorization(keccak256("w2"), worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(keccak256("w2"), worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
         VerdiktEscrow.Escrow memory e = escrow.getEscrow(keccak256("w2"));
         assertEq(e.payer, attacker, "payer must equal msg.sender");
     }
@@ -194,16 +194,17 @@ contract VerdiktEscrowEdgeTest is Test {
 
         // Payer funds work A.
         vm.prank(payer);
-        esc.fundWithAuthorization(keccak256("A"), worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        esc.fundWithAuthorization(keccak256("A"), worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
 
-        bytes32 nonceA = keccak256(abi.encode(keccak256("A"), worker, AMT, payer));
+        // Contract derives nonce = keccak256(workId, worker, amount, fee, ttl, payer). Fund used fee=0, ttl=604800.
+        bytes32 nonceA = keccak256(abi.encode(keccak256("A"), worker, AMT, uint256(0), uint256(604800), payer));
         assertTrue(NonceBindingUSDC(USDC).usedNonce(nonceA), "payer's nonce consumed");
 
         // A front-runner who copies the blob but changes the worker computes a DIFFERENT
         // nonce (worker is in the preimage), so the authorization the payer signed is
         // never consumed for the attacker's target. The attacker's own funding uses its
         // own nonce (from = attacker), proving the payer's signature cannot be rebound.
-        bytes32 nonceAttacker = keccak256(abi.encode(keccak256("A"), attacker, AMT, attacker));
+        bytes32 nonceAttacker = keccak256(abi.encode(keccak256("A"), attacker, AMT, uint256(0), uint256(604800), attacker));
         assertTrue(nonceA != nonceAttacker, "nonce must change when worker/payer change");
         assertFalse(NonceBindingUSDC(USDC).usedNonce(nonceAttacker), "attacker tuple not pre-consumed");
     }
@@ -216,13 +217,13 @@ contract VerdiktEscrowEdgeTest is Test {
         VerdiktEscrow esc = new VerdiktEscrow(verdictWallet);
 
         vm.prank(payer);
-        esc.fundWithAuthorization(keccak256("R"), worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        esc.fundWithAuthorization(keccak256("R"), worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
 
         // Settle then attempt to fund a NEW workId whose tuple collides on the same nonce
         // is impossible (workId is in the preimage). But replaying the exact same workId is
         // blocked first by the escrow's "workId exists" guard — verify the token-level guard
         // independently by calling the token directly with the consumed nonce.
-        bytes32 nonceR = keccak256(abi.encode(keccak256("R"), worker, AMT, payer));
+        bytes32 nonceR = keccak256(abi.encode(keccak256("R"), worker, AMT, uint256(0), uint256(604800), payer));
         vm.expectRevert("authorization used");
         NonceBindingUSDC(USDC).receiveWithAuthorization(
             payer, address(esc), AMT, 0, type(uint256).max, nonceR, 27, bytes32(0), bytes32(0)
@@ -327,14 +328,15 @@ contract VerdiktEscrowEdgeTest is Test {
     // ---------------------------------------------------------------
     // EVENTS — every state-changing fn emits an indexed event
     // ---------------------------------------------------------------
-    event Funded(bytes32 indexed workId, address payer, address worker, uint256 amount);
+    event Funded(bytes32 indexed workId, address payer, address worker, uint256 amount, uint256 fee, uint256 deadline);
     event Settled(bytes32 indexed workId, uint8 outcome, address to, uint256 amount, uint8 verdictCode, bytes32 evidenceHash);
 
     function testFundEmitsFundedEvent() public {
-        vm.expectEmit(true, false, false, true);
-        emit Funded(WORK_ID, payer, worker, AMT);
+        // Only the indexed workId topic is asserted; deadline = block.timestamp + ttl is runtime-derived.
+        vm.expectEmit(true, false, false, false);
+        emit Funded(WORK_ID, payer, worker, AMT, 0, 0);
         vm.prank(payer);
-        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
     }
 
     function testSettleEmitsSettledEvent() public {
@@ -367,7 +369,7 @@ contract VerdiktEscrowEdgeTest is Test {
         // SETTLED BEFORE the transfer, the re-entrant settle reverts on "not funded".
         VerdiktEscrow esc = new VerdiktEscrow(address(token));
         vm.prank(payer);
-        esc.fundWithAuthorization(WORK_ID, worker, AMT, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+        esc.fundWithAuthorization(WORK_ID, worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
 
         token.arm(address(esc), WORK_ID);
 
