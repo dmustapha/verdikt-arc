@@ -37,7 +37,7 @@ describe('verifyOffer', () => {
   const NOW = 1_900_000_000;
   const offer = (over: Partial<TaskOffer> = {}): TaskOffer => ({
     workId: `0x${'11'.repeat(32)}`, type: 'tool_output', criteriaHash: criteriaHash(acceptance),
-    amountUsdc: 1, escrow: '0x5f48ca5B08bBB7DA3E9Cf968C36543B4c70A564d',
+    amountUsdc: 1, escrow: '0x4e1a423815294DFD1903D849D4BE84e3391Ea771',
     payer: payer.address as `0x${string}`, seller: '0x665F4AF29aeeeA93cea97813f69a3ED3eAdEF8fF',
     chainId: 5042002, feeUsdc: 0.001, expiresAt: NOW + 3600, ...over,
   });
