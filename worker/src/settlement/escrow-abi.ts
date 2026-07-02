@@ -59,6 +59,13 @@ export const VERDIKT_ESCROW_ABI = [
   },
   {
     type: 'function',
+    name: 'feeRecipient',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'getEscrow',
     stateMutability: 'view',
     inputs: [{ name: 'workId', type: 'bytes32' }],
