@@ -512,17 +512,17 @@ contract VerdiktEscrowTest is Test {
 
     function testRefundExpiredBeforeDeadlineReverts() public {
         _fundFee(FEE);
+        vm.prank(payer);
         vm.expectRevert("not expired");
-        escrow.refundExpired(WORK_ID); // permissionless, but too early
+        escrow.refundExpired(WORK_ID); // authorized caller, but too early
     }
 
-    function testRefundExpiredAfterDeadlinePermissionless() public {
+    function testRefundExpiredByPayer() public {
         _fundFee(FEE);
         uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
         uint256 feeBefore = MockUSDC(USDC).balanceOf(feeRecipient);
         vm.warp(block.timestamp + TTL + 1);
-        // A random third party (not payer/verdict/owner) can trigger the no-show refund.
-        vm.prank(attacker());
+        vm.prank(payer);
         escrow.refundExpired(WORK_ID);
         assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore + AMT, "buyer refunded in full (bounty + fee)");
         assertEq(MockUSDC(USDC).balanceOf(feeRecipient), feeBefore, "no fee on no-show");
@@ -532,11 +532,30 @@ contract VerdiktEscrowTest is Test {
         assertEq(escrow.totalEscrowed(), 0, "accounting cleared");
     }
 
+    // The verdict keeper (Circle DCW) can also trigger the no-show refund.
+    function testRefundExpiredByVerdictKeeper() public {
+        _fundFee(FEE);
+        vm.warp(block.timestamp + TTL + 1);
+        vm.prank(verdictWallet);
+        escrow.refundExpired(WORK_ID);
+        assertEq(escrow.getEscrow(WORK_ID).outcome, 4, "keeper can expire a no-show");
+    }
+
+    // A third party (not payer, not verdict) CANNOT expire — removes the griefing race.
+    function testRefundExpiredRejectsStranger() public {
+        _fundFee(FEE);
+        vm.warp(block.timestamp + TTL + 1);
+        vm.prank(attacker());
+        vm.expectRevert("not authorized");
+        escrow.refundExpired(WORK_ID);
+    }
+
     function testRefundExpiredEmitsEvent() public {
         _fundFee(FEE);
         vm.warp(block.timestamp + TTL + 1);
         vm.expectEmit(true, false, false, true);
         emit Expired(WORK_ID, payer, AMT);
+        vm.prank(payer);
         escrow.refundExpired(WORK_ID);
     }
 
@@ -553,6 +572,7 @@ contract VerdiktEscrowTest is Test {
         bytes32 buyerOnEth = bytes32(uint256(uint160(address(0xE74))));
         _fundFeeRoutes(FEE, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, buyerOnEth));
         vm.warp(block.timestamp + TTL + 1);
+        vm.prank(payer);
         escrow.refundExpired(WORK_ID);
         assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastDomain(), 0, "refunded to Ethereum");
         assertEq(MockTokenMessenger(TOKEN_MESSENGER).lastRecipient(), buyerOnEth);

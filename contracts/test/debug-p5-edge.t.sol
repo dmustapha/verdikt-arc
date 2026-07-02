@@ -102,6 +102,42 @@ contract ReentrantUSDC {
     }
 }
 
+// Same reentrancy probe, but re-enters settlePartial() (the two-transfer path) mid-payout. If CEI
+// were wrong, the re-entrant partial would pass the status guard and double-pay. Because status is
+// flipped to SETTLED before any transfer, the re-entrant call reverts "not funded".
+contract ReentrantPartialUSDC {
+    mapping(address => uint256) public balanceOf;
+    VerdiktEscrow public escrow;
+    bytes32 public targetWorkId;
+    bool public attacked;
+
+    function mint(address to, uint256 amt) external { balanceOf[to] += amt; }
+    function arm(address _escrow, bytes32 _workId) external {
+        escrow = VerdiktEscrow(_escrow);
+        targetWorkId = _workId;
+    }
+
+    function receiveWithAuthorization(
+        address from, address to, uint256 value, uint256, uint256, bytes32, uint8, bytes32, bytes32
+    ) external {
+        require(balanceOf[from] >= value, "insufficient");
+        balanceOf[from] -= value;
+        balanceOf[to] += value;
+    }
+
+    function transfer(address to, uint256 amt) external returns (bool) {
+        if (address(escrow) != address(0) && !attacked) {
+            attacked = true;
+            // Re-enter: try to settlePartial the same workId again mid-transfer.
+            escrow.settlePartial(targetWorkId, 5000, bytes32(0));
+        }
+        require(balanceOf[msg.sender] >= amt, "insufficient");
+        balanceOf[msg.sender] -= amt;
+        balanceOf[to] += amt;
+        return true;
+    }
+}
+
 contract VerdiktEscrowEdgeTest is Test {
     address constant USDC = 0x3600000000000000000000000000000000000000;
     VerdiktEscrow escrow;
@@ -384,5 +420,30 @@ contract VerdiktEscrowEdgeTest is Test {
         VerdiktEscrow.Escrow memory e = esc.getEscrow(WORK_ID);
         assertEq(e.status, 1, "escrow stays FUNDED after reverted reentrancy");
         assertEq(token.balanceOf(worker), 0, "no payout on reentrancy");
+    }
+
+    // settlePartial() does TWO payouts; a malicious token re-entering it mid-transfer must also be
+    // blocked by CEI (status flipped to SETTLED before any transfer). The re-entrant settlePartial
+    // reverts "not funded", bubbling to revert the whole outer call — no double-pay.
+    function testSettlePartialIsReentrancySafe() public {
+        ReentrantPartialUSDC evil = new ReentrantPartialUSDC();
+        vm.etch(USDC, address(evil).code);
+        ReentrantPartialUSDC token = ReentrantPartialUSDC(USDC);
+        token.mint(payer, 100_000000);
+
+        // Make the TOKEN the verdict wallet so its re-entrant settlePartial() passes onlyVerdict.
+        VerdiktEscrow esc = new VerdiktEscrow(address(token));
+        vm.prank(payer);
+        esc.fundWithAuthorization(WORK_ID, worker, AMT, 0, 604800, 0, type(uint256).max, SIG, VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0)));
+
+        token.arm(address(esc), WORK_ID);
+
+        vm.prank(address(token));
+        vm.expectRevert("not funded");
+        esc.settlePartial(WORK_ID, 5000, EVIDENCE);
+
+        VerdiktEscrow.Escrow memory e = esc.getEscrow(WORK_ID);
+        assertEq(e.status, 1, "escrow stays FUNDED after reverted partial reentrancy");
+        assertEq(token.balanceOf(worker), 0, "no payout on partial reentrancy");
     }
 }

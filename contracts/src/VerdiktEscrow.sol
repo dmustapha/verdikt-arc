@@ -356,12 +356,16 @@ contract VerdiktEscrow {
         emit SettledPartial(workId, workerTo, workerAmount, payerTo, payerAmount, bps, evidenceHash);
     }
 
-    /// @notice Permissionless no-show refund. If the seller never delivered and the deadline has
-    ///         passed, ANYONE (the buyer, a keeper) can trigger a full refund of the escrow (bounty
-    ///         + fee) to the buyer. No verdict was rendered, so Verdikt takes no fee.
+    /// @notice No-show refund. If the seller never delivered and the deadline has passed, the buyer
+    ///         (payer) OR the verdict keeper can trigger a full refund of the escrow (bounty + fee)
+    ///         to the buyer. No verdict was rendered, so Verdikt takes no fee. Restricting the caller
+    ///         to payer-or-verdict removes a griefing race where a third party expires a job the
+    ///         instant its deadline passes while delivery/verification is still legitimately in
+    ///         flight; the funds always return to the buyer, so only these two parties need the lever.
     function refundExpired(bytes32 workId) external {
         Escrow storage e = escrows[workId];
         require(e.status == STATUS_FUNDED, "not funded");
+        require(msg.sender == e.payer || msg.sender == verdict, "not authorized");
         require(block.timestamp > e.deadline, "not expired");
 
         e.status = STATUS_SETTLED;
