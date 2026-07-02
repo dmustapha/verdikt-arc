@@ -24,6 +24,8 @@ interface IVerdiktEscrow {
         address payer,
         address worker,
         uint256 amount,
+        uint256 fee,
+        uint256 ttl,
         PayoutRoutes calldata routes
     ) external;
 }
@@ -45,9 +47,12 @@ contract EscrowFundingHook {
     // CCTP V2 message layout: hookData is the trailing field of the message body.
     // 148 (MessageV2 header) + 228 (BurnMessageV2 hookData offset) = 376. hookData runs to the end.
     uint256 private constant HOOK_DATA_OFFSET = 376;
-    // hookData = abi.encode(workId, payer, worker, workerDomain, workerRecipient, payerDomain,
-    // payerRecipient) = 7 * 32 bytes. The payout routes let the buyer settle/refund cross-chain too.
-    uint256 private constant HOOK_DATA_LEN = 224;
+    // hookData = abi.encode(workId, payer, worker, fee, ttl, workerDomain, workerRecipient,
+    // payerDomain, payerRecipient) = 9 * 32 bytes. fee/ttl carry the verdict-fee split and no-show
+    // deadline through the bridge; the payout routes let the buyer settle/refund cross-chain too.
+    uint256 private constant HOOK_DATA_LEN = 288;
+    // Recovery-fallback deadline for adminFundFromBalance (owner manually funds a rescued mint).
+    uint256 private constant ADMIN_FALLBACK_TTL = 7 days;
 
     bool private locked;
 
@@ -97,16 +102,17 @@ contract EscrowFundingHook {
 
         (
             bytes32 workId, address payer, address worker,
+            uint256 fee, uint256 ttl,
             uint32 workerDomain, bytes32 workerRecipient,
             uint32 payerDomain, bytes32 payerRecipient
         ) = abi.decode(
             message[HOOK_DATA_OFFSET:],
-            (bytes32, address, address, uint32, bytes32, uint32, bytes32)
+            (bytes32, address, address, uint256, uint256, uint32, bytes32, uint32, bytes32)
         );
 
         usdc.approve(address(escrow), minted);
         escrow.fundCrossChain(
-            workId, payer, worker, minted,
+            workId, payer, worker, minted, fee, ttl,
             IVerdiktEscrow.PayoutRoutes(workerDomain, workerRecipient, payerDomain, payerRecipient)
         );
         emit CrossChainFunded(workId, payer, worker, minted);
@@ -133,9 +139,10 @@ contract EscrowFundingHook {
         require(amount > 0, "amount=0");
         require(usdc.balanceOf(address(this)) >= amount, "insufficient balance");
         usdc.approve(address(escrow), amount);
-        // Recovery fallback funds with LOCAL (Arc) payout routes — the operator settles manually.
+        // Recovery fallback funds with LOCAL (Arc) payout routes and no verdict fee — the operator
+        // settles manually. A fixed fallback TTL keeps the no-show refund path available.
         escrow.fundCrossChain(
-            workId, payer, worker, amount,
+            workId, payer, worker, amount, 0, ADMIN_FALLBACK_TTL,
             IVerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0))
         );
         emit CrossChainFunded(workId, payer, worker, amount);

@@ -43,19 +43,27 @@ contract EscrowFundingHookTest is Test {
         pure
         returns (bytes memory)
     {
-        // Default to LOCAL payout routes (Arc); see _messageRouted for cross-chain.
-        return _messageRouted(workId, p, w, salt, 0, bytes32(0), 0, bytes32(0));
+        // Default: no verdict fee, 1-day ttl, LOCAL payout routes (Arc).
+        return _messageFull(workId, p, w, salt, 0, 1 days, 0, bytes32(0), 0, bytes32(0));
     }
 
     function _messageRouted(
         bytes32 workId, address p, address w, bytes1 salt,
         uint32 wDom, bytes32 wRcpt, uint32 pDom, bytes32 pRcpt
     ) internal pure returns (bytes memory) {
+        return _messageFull(workId, p, w, salt, 0, 1 days, wDom, wRcpt, pDom, pRcpt);
+    }
+
+    function _messageFull(
+        bytes32 workId, address p, address w, bytes1 salt,
+        uint256 fee, uint256 ttl,
+        uint32 wDom, bytes32 wRcpt, uint32 pDom, bytes32 pRcpt
+    ) internal pure returns (bytes memory) {
         bytes memory prefix = new bytes(376);
         prefix[0] = salt;
-        // hookData v2 = abi.encode(workId, payer, worker, workerDomain, workerRecipient,
-        // payerDomain, payerRecipient) = 224 bytes.
-        return bytes.concat(prefix, abi.encode(workId, p, w, wDom, wRcpt, pDom, pRcpt));
+        // hookData v3 = abi.encode(workId, payer, worker, fee, ttl, workerDomain, workerRecipient,
+        // payerDomain, payerRecipient) = 288 bytes.
+        return bytes.concat(prefix, abi.encode(workId, p, w, fee, ttl, wDom, wRcpt, pDom, pRcpt));
     }
 
     function testMintAndFundHappyPath() public {
@@ -129,9 +137,21 @@ contract EscrowFundingHookTest is Test {
 
     function testMintAndFundLengthGuard() public {
         transmitter.setMint(AMT);
-        bytes memory short = new bytes(599); // one byte below 376 + 224
+        bytes memory short = new bytes(663); // one byte below 376 + 288
         vm.expectRevert("message too short");
         hook.mintAndFund(short, "");
+    }
+
+    // hookData v3 carries the verdict fee + no-show ttl through the bridge to the escrow.
+    function testMintAndFundDecodesFeeAndTtl() public {
+        uint256 verdictFee = 1_000000; // 1 USDC fee inside the 5 USDC escrow
+        uint256 ttl = 2 days;
+        transmitter.setMint(AMT);
+        hook.mintAndFund(_messageFull(WORK_ID, payer, worker, 0x01, verdictFee, ttl, 0, bytes32(0), 0, bytes32(0)), "");
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.amount, AMT, "full minted amount escrowed");
+        assertEq(e.fee, verdictFee, "verdict fee decoded from hookData");
+        assertEq(e.deadline, block.timestamp + ttl, "deadline = now + ttl");
     }
 
     // hookData v2 carries cross-chain payout routes through to the escrow.
