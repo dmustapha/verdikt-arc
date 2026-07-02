@@ -46,14 +46,17 @@ export function x402Driver(opts: X402DriverOpts): SellerTransport {
     ?? (opts.privateKey ? (privateKeyToAccount(opts.privateKey) as unknown as EvmSigner) : undefined as unknown as EvmSigner);
   if (!signer) throw new Error('x402Driver requires an account or privateKey (the toll payer)');
 
-  // THE reconciliation chokepoint: pick the requirement on our network and refuse anything over cap.
+  // THE reconciliation chokepoint. The core client has already filtered `requirements` to our
+  // registered network+scheme, so pick the CHEAPEST offer and refuse if even that exceeds the cap.
+  // Picking the minimum (not the first) means a seller can't grief us by listing a bounty-sized decoy
+  // ahead of a legitimate sub-cent toll — and the cap guarantees the bounty is never paid via x402.
   const selectTollOnly: SelectPaymentRequirements = (_version, requirements: PaymentRequirements[]) => {
-    const match = requirements.find((r) => r.network === opts.network) ?? requirements[0];
-    if (!match) throw new Error('x402: seller offered no payable requirement');
-    if (BigInt(match.amount) > opts.tollCapAtomic) {
-      throw new Error(`x402: required ${match.amount} exceeds toll cap ${opts.tollCapAtomic} — refusing (the bounty is never paid via x402)`);
+    if (requirements.length === 0) throw new Error('x402: seller offered no payable requirement');
+    const cheapest = requirements.reduce((lo, r) => (BigInt(r.amount) < BigInt(lo.amount) ? r : lo));
+    if (BigInt(cheapest.amount) > opts.tollCapAtomic) {
+      throw new Error(`x402: cheapest requirement ${cheapest.amount} exceeds toll cap ${opts.tollCapAtomic} — refusing (the bounty is never paid via x402)`);
     }
-    return match;
+    return cheapest;
   };
 
   function payFetch(job: JobRow): typeof fetch {

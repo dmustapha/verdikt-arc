@@ -25,24 +25,27 @@ describe('sellerAdapter routing', () => {
   it('routes dispatch to the driver named by job.sellerProtocol', async () => {
     const webhook = spyDriver(), a2a = spyDriver(), x402 = spyDriver();
     const adapter = sellerAdapter({ webhook, a2a, x402 });
+    // Stable instances — job() mints a fresh Date each call, so reuse the SAME object we assert on.
+    const wJob = job('webhook'), aJob = job('a2a'), xJob = job('x402');
 
-    await adapter.dispatch(job('webhook'));
-    await adapter.dispatch(job('a2a'));
-    await adapter.dispatch(job('x402'));
+    await adapter.dispatch(wJob);
+    await adapter.dispatch(aJob);
+    await adapter.dispatch(xJob);
 
     expect(webhook.dispatch).toHaveBeenCalledTimes(1);
     expect(a2a.dispatch).toHaveBeenCalledTimes(1);
     expect(x402.dispatch).toHaveBeenCalledTimes(1);
-    expect(webhook.dispatch).toHaveBeenCalledWith(job('webhook'));
+    expect(webhook.dispatch).toHaveBeenCalledWith(wJob);
   });
 
   it('routes fetchResult (with resultRef) to the same driver', async () => {
     const webhook = spyDriver(), a2a = spyDriver(), x402 = spyDriver();
     const adapter = sellerAdapter({ webhook, a2a, x402 });
+    const aJob = job('a2a');
 
-    await adapter.fetchResult(job('a2a'), 'task-123');
+    await adapter.fetchResult(aJob, 'task-123');
 
-    expect(a2a.fetchResult).toHaveBeenCalledWith(job('a2a'), 'task-123');
+    expect(a2a.fetchResult).toHaveBeenCalledWith(aJob, 'task-123');
     expect(webhook.fetchResult).not.toHaveBeenCalled();
     expect(x402.fetchResult).not.toHaveBeenCalled();
   });
