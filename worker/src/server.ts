@@ -8,6 +8,7 @@ import { tryRouter } from './routes/try.js';
 import { jobsRouter } from './routes/jobs.js';
 import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
+import { evidenceRouter } from './routes/evidence.js';
 import { engine, startWorkerKeeper } from './lib/engine-instance.js';
 
 const app = express();
@@ -30,6 +31,8 @@ app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
 app.use(jobsRouter);
+// ERC-8004 evidence bundles (public, read-only) — the responseURI a validationResponse points at.
+app.use(evidenceRouter);
 // Seller registry: register (validate → probe → store healthy/unhealthy) + list the healthy catalog.
 app.use(makeSellersRouter());
 // Seller delivery callbacks feed the shared job engine's onDelivery (verify → settle).
