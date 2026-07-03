@@ -1112,3 +1112,92 @@ a { color: inherit; text-decoration: none; }
 .hf-economics strong { color: var(--text); }
 .hf-error { color: var(--refund); font-size: 0.9rem; margin: 14px 0 0; }
 @media (max-width: 720px) { .hf-fields { grid-template-columns: 1fr; } }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   WS8 — Async job dashboard (/jobs + /jobs/[id]). Reuses the landing tokens
+   (--emerald/--release/--refund/--abstain/--panel/--hair/--mono…).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* State chips (shared by list + detail) */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--radius-full); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; border: 1px solid var(--hair-strong); white-space: nowrap; }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip-good { color: var(--emerald); background: var(--emerald-soft); border-color: var(--emerald-line); }
+.chip-warn { color: var(--abstain); background: var(--abstain-faint); border-color: var(--abstain-line); }
+.chip-bad  { color: var(--refund); background: var(--refund-faint); border-color: var(--refund-line); }
+.chip-live { color: var(--gold-2); background: var(--gold-soft); border-color: var(--gold-line); }
+.chip-live::before { animation: chip-pulse 1.4s var(--ease) infinite; }
+.chip-idle { color: var(--text-dim); background: var(--surface); }
+@keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.jt-dim { color: var(--text-faint); }
+.jt-link { color: var(--emerald); font-size: 0.85rem; white-space: nowrap; }
+.jt-link:hover { text-decoration: underline; }
+
+/* Lookup box */
+.jobs-lookup { margin: 26px 0 6px; }
+.jl-row { display: flex; gap: 10px; align-items: center; max-width: 520px; }
+.jl-row input { flex: 1; padding: 10px 14px; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--radius-md); color: var(--text); font-size: 0.85rem; }
+.jl-row input:focus-visible { outline: none; border-color: var(--emerald-line); }
+.jl-row [aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+
+/* List table */
+.jobs-table-wrap { margin: 28px 0 0; }
+.jobs-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.88rem; }
+.jobs-table thead th { text-align: left; padding: 8px 12px; color: var(--text-faint); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--hair); }
+.jobs-table tbody td { padding: 12px; border-bottom: 1px solid var(--hair); vertical-align: middle; }
+.jobs-table tbody tr:hover { background: var(--surface); }
+.jobs-recent { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.hc-empty { color: var(--text-dim); font-size: 0.9rem; margin: 12px 0 0; }
+
+/* Detail */
+.jd-empty { padding: 40px 0; display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
+.jd-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.jd-back { color: var(--text-dim); font-size: 0.85rem; }
+.jd-back:hover { color: var(--emerald); }
+.jd-id { font-size: 0.95rem; margin: 18px 0 2px; color: var(--text); }
+.jd-work { font-size: 0.78rem; margin: 0 0 4px; }
+
+/* Timeline */
+.jd-timeline { list-style: none; display: flex; padding: 0; margin: 26px 0 30px; gap: 0; }
+.jd-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; text-align: center; }
+.jd-step::before { content: ""; position: absolute; top: 6px; left: -50%; width: 100%; height: 2px; background: var(--hair); z-index: 0; }
+.jd-step:first-child::before { display: none; }
+.jd-step.done::before, .jd-step.here::before { background: var(--emerald-line); }
+.jd-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--surface); border: 2px solid var(--hair-strong); z-index: 1; }
+.jd-step.done .jd-dot { background: var(--emerald); border-color: var(--emerald); }
+.jd-step.here .jd-dot { border-color: var(--emerald); box-shadow: 0 0 10px var(--emerald-soft); background: var(--bg); }
+.jd-step[data-tone="good"] .jd-dot { background: var(--emerald); border-color: var(--emerald); }
+.jd-step[data-tone="warn"] .jd-dot { background: var(--abstain); border-color: var(--abstain); }
+.jd-step[data-tone="bad"] .jd-dot { background: var(--refund); border-color: var(--refund); }
+.jd-step-label { font-size: 0.72rem; color: var(--text-faint); max-width: 96px; }
+.jd-step.done .jd-step-label, .jd-step.here .jd-step-label { color: var(--text-dim); }
+
+/* Panels */
+.jd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.jd-panel { background: var(--panel); border: 1px solid var(--hair); border-radius: var(--radius-lg); padding: 20px 22px; margin-bottom: 18px; }
+.jd-panel-h { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 14px; }
+.jd-dl { display: grid; gap: 10px; margin: 0; }
+.jd-dl > div { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.jd-dl dt { color: var(--text-faint); font-size: 0.82rem; }
+.jd-dl dd { margin: 0; color: var(--text); font-size: 0.85rem; }
+.jd-verdict { font-family: var(--serif); font-size: 1.7rem; font-weight: 600; margin: 0 0 8px; color: var(--text); }
+.jd-verdict[data-v="pass"] { color: var(--emerald); }
+.jd-verdict[data-v="fail"] { color: var(--refund); }
+.jd-verdict[data-v="abstain"] { color: var(--abstain); }
+.jd-verdict[data-v="partial"] { color: var(--gold-2); }
+.jd-verdict span { font-family: var(--sans); font-size: 0.8rem; font-weight: 400; }
+.jd-rationale { font-size: 0.88rem; line-height: 1.55; color: var(--text-dim); margin: 8px 0; }
+.jd-route { font-size: 0.74rem; margin: 10px 0 0; }
+.jd-proof { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.jd-proof li { display: flex; justify-content: space-between; gap: 16px; font-size: 0.84rem; align-items: baseline; }
+.jd-proof a { color: var(--emerald); }
+.jd-proof a:hover { text-decoration: underline; }
+.jd-note { margin-top: 8px; }
+
+@media (max-width: 720px) {
+  .jd-grid { grid-template-columns: 1fr; }
+  .jobs-table thead { display: none; }
+  .jobs-table tbody td { display: inline-block; border: none; padding: 4px 10px; }
+  .jobs-table tbody tr { display: block; border-bottom: 1px solid var(--hair); padding: 8px 0; }
+  .jd-step-label { font-size: 0.64rem; }
+}

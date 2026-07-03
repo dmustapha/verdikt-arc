@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useSignTypedData, useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
 import { arcTestnet, txUrl, addressUrl } from '../../lib/chains';
+import { rememberJobId } from '../../lib/job-state';
 import { ARC_USDC_ADDRESS, buildAuthorization, fundBody } from '../../lib/relayer-sign';
 import { CAPABILITY_CONFIG, CAPABILITY_NAME } from '../../lib/catalog';
 import type { Outcome, VerdictLabel } from '../../types';
@@ -62,6 +64,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
   const [outcome, setOutcome] = useState<Outcome | undefined>();
   const [settleTx, setSettleTx] = useState<string | null>(null);
   const [fundTx, setFundTx] = useState<string | null>(null);
+  const [trackJobId, setTrackJobId] = useState<string | null>(null); // WS8: dashboard return link
   const [status, setStatus] = useState('idle');
   const [busy, setBusy] = useState(false);
   const [flowActive, setFlowActive] = useState(false); // true for the WHOLE flow (funding + SSE wait)
@@ -79,7 +82,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
     setSelected(s);
     const cfg = CAPABILITY_CONFIG[s.capability];
     setInputs(cfg ? { ...cfg.example } : {});
-    setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null); setError(null); setStatus('idle');
+    setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null); setTrackJobId(null); setError(null); setStatus('idle');
   }
   const push = (s: Step) => setSteps((cur) => [...cur, s]);
   function stop() { runningRef.current = false; setBusy(false); setFlowActive(false); esRef.current?.close(); if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; } }
@@ -132,7 +135,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
     if (!built.ok) { setError(built.error); return; }
 
     runningRef.current = true; setBusy(true); setFlowActive(true); setError(null); setFaucetMsg(null);
-    setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null);
+    setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null); setTrackJobId(null);
     const workId = randomWorkId();
     const worker = selected.wallet;
 
@@ -180,7 +183,10 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workId, seller: { url: selected.endpoint, protocol: selected.protocol } }),
       });
-      if (!jRes.ok) throw new Error((await jRes.json().catch(() => ({}))).error ?? 'dispatch failed');
+      const jBody = await jRes.json().catch(() => ({}));
+      if (!jRes.ok) throw new Error(jBody.error ?? 'dispatch failed');
+      // WS8: capture the jobId so the buyer can leave and return to the dashboard mid-flight.
+      if (jBody.jobId) { setTrackJobId(jBody.jobId); rememberJobId(jBody.jobId); }
       setStatus('agent working…'); push({ key: 'awaiting', text: 'Agent is working — the verdict will settle automatically.', tone: 'neutral' });
       setBusy(false); // funding done; the async verdict/settle streams over SSE
       // Watchdog: if no verdict streams back in time (dead stream / slow or no-show seller), tell the
@@ -323,6 +329,10 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
                 {settleTx && (
                   <div className="settle-row" data-state={settleState ?? undefined}><p className="sr-label">On-chain settlement</p>
                     <a href={txUrl(settleTx)} target="_blank" rel="noreferrer">{settleTx.slice(0, 18)}… ↗</a></div>
+                )}
+                {trackJobId && (
+                  <div className="settle-row"><p className="sr-label">Leave &amp; return</p>
+                    <Link href={`/jobs/${trackJobId}`}>Track this job →</Link></div>
                 )}
               </div>
             </div>
