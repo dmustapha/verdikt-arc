@@ -55,12 +55,16 @@ function mkEngine(over: Partial<Parameters<typeof makeEngine>[0]> = {}) {
   const refundExpiredOnChain = (over.refundExpiredOnChain ?? vi.fn().mockResolvedValue('0xrefund')) as ReturnType<typeof vi.fn>;
   const getTask = (over.getTask ?? vi.fn().mockResolvedValue(task)) as ReturnType<typeof vi.fn>;
   const now = over.now ?? (() => Date.now());
+  const emit = (over.emit ?? vi.fn()) as ReturnType<typeof vi.fn>;
   const engine = makeEngine({
-    store, transport, verify, refundExpiredOnChain, getTask, now,
+    store, transport, verify, refundExpiredOnChain, getTask, now, emit,
     dispatch: { maxAttempts: 3, baseDelayMs: 1, sleep: vi.fn().mockResolvedValue(undefined) },
   });
-  return { engine, store, transport, verify, refundExpiredOnChain, getTask };
+  return { engine, store, transport, verify, refundExpiredOnChain, getTask, emit };
 }
+
+// The states each transition emits, in order (WS8 dashboard SSE). Helper to read a spy's calls.
+const emittedStates = (emit: ReturnType<typeof vi.fn>) => emit.mock.calls.map((c) => c[1]);
 
 describe('job-engine — startJob', () => {
   it('dispatches and lands in AWAITING_DELIVERY on success', async () => {
@@ -150,6 +154,64 @@ describe('job-engine — onDelivery', () => {
     await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { resultRef: 'https://seller.example.com/tasks/1' });
     expect(ctx.verify).not.toHaveBeenCalled();
     expect(ctx.store.rows.get('j1')!.state).toBe('AWAITING_DELIVERY');
+  });
+});
+
+describe('job-engine — job_state SSE emit (WS8 dashboard)', () => {
+  it('emits FUNDED → DISPATCHED → AWAITING_DELIVERY on a successful dispatch, keyed by workId', async () => {
+    const { engine, emit } = mkEngine();
+    await engine.startJob(createInput);
+    expect(emittedStates(emit)).toEqual(['FUNDED', 'DISPATCHED', 'AWAITING_DELIVERY']);
+    expect(emit).toHaveBeenCalledWith(task.workId, 'FUNDED'); // every event carries the workId channel
+  });
+
+  it('emits the full lifecycle through the terminal state on delivery → release', async () => {
+    const ctx = mkEngine();
+    await ctx.engine.startJob(createInput);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    expect(emittedStates(ctx.emit)).toEqual(['FUNDED', 'DISPATCHED', 'AWAITING_DELIVERY', 'DELIVERED', 'VERIFYING', 'SETTLED']);
+  });
+
+  it('emits ABSTAINED (not SETTLED) when the verdict abstains', async () => {
+    const ctx = mkEngine({ verify: vi.fn().mockResolvedValue(verdictResult('abstain', '0xtx')) });
+    await ctx.engine.startJob(createInput);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    expect(emittedStates(ctx.emit).at(-1)).toBe('ABSTAINED');
+  });
+
+  it('emits EXPIRED when the keeper no-shows a past-deadline job', async () => {
+    const ctx = mkEngine({ now: () => Date.now() });
+    await ctx.engine.startJob({ ...createInput, deadline: new Date(Date.now() - 1000) });
+    ctx.emit.mockClear();
+    await ctx.engine.expireJob('j1');
+    expect(emittedStates(ctx.emit)).toEqual(['EXPIRED']);
+  });
+
+  it('does NOT emit on a lost race — a duplicate delivery emits the lifecycle only once', async () => {
+    const ctx = mkEngine();
+    await ctx.engine.startJob(createInput);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    const afterFirst = emittedStates(ctx.emit).length;
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact }); // duplicate loses claimDelivery
+    expect(emittedStates(ctx.emit).length).toBe(afterFirst); // no extra DELIVERED/VERIFYING/SETTLED
+  });
+
+  it('a settlement that never confirms emits no terminal state (keeper still owns expiry)', async () => {
+    const ctx = mkEngine({ verify: vi.fn().mockResolvedValue(verdictResult('release', null)) });
+    await ctx.engine.startJob(createInput);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    const states = emittedStates(ctx.emit);
+    expect(states).toContain('VERIFYING');
+    expect(states).not.toContain('SETTLED'); // no txHash → no markSettled → no emit
+  });
+
+  it('never throws when emit throws — a broken SSE bus cannot stall the lifecycle', async () => {
+    const emit = vi.fn().mockImplementation(() => { throw new Error('sse down'); });
+    const ctx = mkEngine({ emit });
+    const job = await ctx.engine.startJob(createInput);
+    expect(job!.state).toBe('AWAITING_DELIVERY'); // dispatch completed despite emit throwing
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    expect(ctx.store.rows.get('j1')!.state).toBe('SETTLED'); // settlement completed too
   });
 });
 

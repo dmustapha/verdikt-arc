@@ -4,7 +4,7 @@ import { insertTask } from '../../src/lib/db.js';
 import {
   createJob, getJob, getJobByWorkId,
   markDispatched, markAwaiting, claimDelivery, markVerifying, markSettled, markExpired,
-  recordDispatchAttempt, listByState, recordSeenJti, setResultRef,
+  recordDispatchAttempt, listByState, listByPayer, recordSeenJti, setResultRef,
 } from '../../src/lib/job-store.js';
 import type { Task, Artifact } from '../../src/types.js';
 
@@ -185,5 +185,36 @@ describe('job-store — jti dedupe + listByState', () => {
     expect(awaiting.some((j: { jobId: string }) => j.jobId === job)).toBe(true);
     const funded = await listByState(['FUNDED']);
     expect(funded.some((j: { jobId: string }) => j.jobId === job)).toBe(false);
+  });
+});
+
+describe('job-store — listByPayer (WS8 dashboard)', () => {
+  // A payer unique to this run, so the assertions hold no matter what else is in the shared DB.
+  const payer = `0x${Buffer.from(`payer${suffix}`).toString('hex').padEnd(40, '0').slice(0, 40)}` as `0x${string}`;
+
+  async function seedFor(tag: string, p: string) {
+    const work = mkWork(tag); const job = `job-${suffix}-${tag}`; ids.push({ work, job });
+    await insertTask({ workId: work, type: 'code', payer: p as `0x${string}`, worker: `0x${'22'.repeat(20)}`, amountUsdc: 0.1, acceptance: { spec: 's' } });
+    await createJob({ jobId: job, workId: work, sellerUrl: 'https://s/x', sellerProtocol: 'webhook', callbackToken: 't', resultRef: null, deadline });
+    return job;
+  }
+
+  it('returns only the jobs funded by that payer, newest first, case-insensitively', async () => {
+    const first = await seedFor('lbpA', payer);
+    await new Promise((r) => setTimeout(r, 10)); // ensure a distinct created_at ordering
+    const second = await seedFor('lbpB', payer);
+    const other = await seedFor('lbpC', `0x${'99'.repeat(20)}`); // a different payer — must be excluded
+
+    const rows = await listByPayer(payer.toUpperCase()); // upper-case → still matches (lower(=) join)
+    const jobIds = rows.map((r) => r.jobId);
+    expect(jobIds).toContain(first);
+    expect(jobIds).toContain(second);
+    expect(jobIds).not.toContain(other);
+    // newest first: 'second' precedes 'first'
+    expect(jobIds.indexOf(second)).toBeLessThan(jobIds.indexOf(first));
+  });
+
+  it('returns an empty array for a payer with no jobs', async () => {
+    expect(await listByPayer(`0x${'ab'.repeat(20)}`)).toEqual([]);
   });
 });
