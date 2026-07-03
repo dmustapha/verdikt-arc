@@ -15,6 +15,8 @@ export interface SellerRegistration {
   payoutDomain: number;           // CCTP domain id of that home chain
   agentId?: string;               // optional ERC-8004 identity
   termsAccepted: boolean;         // MUST accept deliver-then-settle (paid only on verified delivery)
+  // WS7 — pre-built acceptance for the human catalog: the governing criterion + what the buyer supplies.
+  acceptanceTemplate?: { spec: string; inputLabel: string };
 }
 
 const PROTOCOLS: SellerProtocol[] = ['webhook', 'a2a', 'x402'];
@@ -43,11 +45,25 @@ export function validateRegistration(input: unknown): ValidationResult {
   }
   if (b.agentId !== undefined && typeof b.agentId !== 'string') return fail('agentId must be a string when present');
   if (b.termsAccepted !== true) return fail('deliver-then-settle terms must be accepted (termsAccepted: true)');
+
+  // Optional acceptance template — when present it must carry a non-empty spec + inputLabel (the two
+  // strings the human catalog renders). Malformed templates are rejected rather than silently dropped.
+  let acceptanceTemplate: { spec: string; inputLabel: string } | undefined;
+  if (b.acceptanceTemplate !== undefined) {
+    const t = b.acceptanceTemplate as Record<string, unknown>;
+    if (typeof t !== 'object' || t === null || typeof t.spec !== 'string' || t.spec.trim() === ''
+      || typeof t.inputLabel !== 'string' || t.inputLabel.trim() === '') {
+      return fail('acceptanceTemplate must be { spec: string, inputLabel: string } with non-empty values');
+    }
+    acceptanceTemplate = { spec: t.spec.trim(), inputLabel: t.inputLabel.trim() };
+  }
+
   return {
     ok: true,
     value: {
       endpoint: b.endpoint, protocol: b.protocol as SellerProtocol, capability: b.capability.trim(),
       wallet: b.wallet, payoutDomain: b.payoutDomain, agentId: b.agentId as string | undefined, termsAccepted: true,
+      acceptanceTemplate,
     },
   };
 }

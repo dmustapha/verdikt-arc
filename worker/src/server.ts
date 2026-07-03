@@ -6,6 +6,7 @@ import { demoRouter } from './routes/demo.js';
 import { tasksRouter } from './routes/tasks.js';
 import { tryRouter } from './routes/try.js';
 import { jobsRouter } from './routes/jobs.js';
+import { relayerRouter } from './routes/relayer.js';
 import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
 import { evidenceRouter } from './routes/evidence.js';
@@ -20,9 +21,13 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 // Restrict money-moving routes to the known web origin. The SSE stream route (read-only)
 // sets its own `*` header. WEB_ORIGIN unset falls back to `*` for local dev only.
-app.use((_, res, next) => {
+app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', process.env.WEB_ORIGIN ?? '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Payment-Signature,X-Payment,X-Demo-Secret');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  // WS7: a browser POST /relayer/fund with Content-Type: application/json triggers a CORS preflight.
+  // Answer it here (204) so the human web path can call the money-moving routes cross-origin.
+  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   next();
 });
 
@@ -33,6 +38,8 @@ app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
 app.use(jobsRouter);
+// WS7: gasless relayer — submits a human's pre-signed EIP-3009 authorization so the human pays no gas.
+app.use(relayerRouter);
 // ERC-8004 evidence bundles (public, read-only) — the responseURI a validationResponse points at.
 app.use(evidenceRouter);
 // Seller registry: register (validate → probe → store healthy/unhealthy) + list the healthy catalog.

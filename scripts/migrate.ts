@@ -69,6 +69,10 @@ async function migrate() {
     last_probe_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
   await sql`CREATE INDEX IF NOT EXISTS vk_sellers_status_idx ON vk_sellers(status)`;
+  // WS7 — catalog acceptance template: { spec, inputLabel } shown per catalog agent so the human
+  // buyer supplies ONLY their input and the governing criterion is pre-built. Added via ALTER so
+  // existing sellers rows are preserved (nullable — pre-WS7 sellers simply have no template).
+  await sql`ALTER TABLE vk_sellers ADD COLUMN IF NOT EXISTS acceptance_template JSONB`;
 
   // WS6 — ERC-8004 attestation evidence, keyed by requestHash. bundle_json is TEXT (NOT JSONB) on
   // purpose: the served bytes must be byte-identical to what keccak256 hashed into the on-chain

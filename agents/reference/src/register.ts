@@ -31,6 +31,8 @@ async function main() {
       wallet: WALLET,
       payoutDomain: PAYOUT_DOMAIN,
       termsAccepted: true,
+      // WS7: carry the pre-built acceptance into the catalog so the human supplies only their input.
+      acceptanceTemplate: skill.acceptanceTemplate,
     };
     const res = await fetch(`${WORKER_URL}/sellers/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(registration),

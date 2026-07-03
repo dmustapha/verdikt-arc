@@ -39,6 +39,25 @@ describe('validateRegistration', () => {
     void agentId;
     expect(validateRegistration(noAgent).ok).toBe(true);
   });
+
+  // WS7 — the human catalog's pre-built acceptance template.
+  it('accepts and trims a valid acceptanceTemplate', () => {
+    const r = validateRegistration({ ...valid, acceptanceTemplate: { spec: '  answer using only sources  ', inputLabel: ' your question ' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.acceptanceTemplate).toEqual({ spec: 'answer using only sources', inputLabel: 'your question' });
+  });
+
+  it('accepts registration without the optional acceptanceTemplate', () => {
+    const r = validateRegistration(valid);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.acceptanceTemplate).toBeUndefined();
+  });
+
+  it('rejects a malformed acceptanceTemplate (missing/empty fields)', () => {
+    expect(validateRegistration({ ...valid, acceptanceTemplate: { spec: 'x' } }).ok).toBe(false);
+    expect(validateRegistration({ ...valid, acceptanceTemplate: { spec: '  ', inputLabel: 'y' } }).ok).toBe(false);
+    expect(validateRegistration({ ...valid, acceptanceTemplate: 'not-an-object' }).ok).toBe(false);
+  });
 });
 
 const jsonResp = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 500, status, json: async () => body, text: async () => JSON.stringify(body) } as Response);

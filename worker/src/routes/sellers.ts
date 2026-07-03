@@ -36,7 +36,12 @@ export async function handleRegister(deps: RegisterDeps, body: unknown): Promise
 
 // Public catalog projection — the fields a buyer needs to pick an agent (no internal-only leakage).
 function publicView(s: SellerRow) {
-  return { sellerId: s.sellerId, endpoint: s.endpoint, protocol: s.protocol, capability: s.capability, wallet: s.wallet, payoutDomain: s.payoutDomain, agentId: s.agentId };
+  return {
+    sellerId: s.sellerId, endpoint: s.endpoint, protocol: s.protocol, capability: s.capability,
+    wallet: s.wallet, payoutDomain: s.payoutDomain, agentId: s.agentId,
+    // WS7: the human catalog renders this — governing criterion + what the buyer supplies.
+    acceptanceTemplate: s.acceptanceTemplate,
+  };
 }
 
 export async function handleList(deps: ListDeps): Promise<HandlerResult> {
