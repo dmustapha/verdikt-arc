@@ -61,3 +61,5 @@ design/
 screenshots/
 submission/
 worker/fixtures/
+worker/.secrets/
+.secrets/
