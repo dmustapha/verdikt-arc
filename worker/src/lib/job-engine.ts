@@ -3,7 +3,8 @@ import type { JobRow, SellerProtocol } from './job-store.js';
 import type { SellerTransport } from './transport.js';
 import type { Delivery } from '../routes/callback.js';
 import type { VerdictRunResult } from '../engine/orchestrator.js';
-import { isTerminal } from './job-machine.js';
+import { isTerminal, outcomeToState } from './job-machine.js';
+import type { JobState } from './job-machine.js';
 import { dispatchWithRetry } from './dispatcher.js';
 import { buildSellerBrief } from './seller-brief.js';
 
@@ -39,6 +40,10 @@ export interface EngineDeps {
   refundExpiredOnChain(workId: `0x${string}`): Promise<string>;        // default: settlement/expire
   now(): number;
   dispatch: { maxAttempts: number; baseDelayMs: number; sleep(ms: number): Promise<void> };
+  // WS8: fire-and-forget SSE hook, called ONLY on a won transition (never a lost race). Optional so the
+  // engine stays pure in unit tests; the production wiring publishes 'job_state' on the sseBus. It must
+  // never throw — a broken stream can never stall the money path — so every call is wrapped below.
+  emit?(workId: `0x${string}`, state: JobState): void;
 }
 
 export interface CreateJobInput {
@@ -60,10 +65,16 @@ export interface JobEngine {
 export function makeEngine(deps: EngineDeps): JobEngine {
   const { store, transport, verify, getTask, refundExpiredOnChain, now } = deps;
 
+  // Safe emit: swallow any error so a broken SSE bus can NEVER interrupt the lifecycle / money path.
+  const emit = (workId: `0x${string}`, state: JobState) => {
+    try { deps.emit?.(workId, state); } catch { /* SSE is best-effort, off the money path */ }
+  };
+
   async function startJob(input: CreateJobInput): Promise<JobRow | null> {
     await store.createJob(input);
     const job = await store.getJob(input.jobId);
     if (!job) return null;
+    emit(input.workId, 'FUNDED'); // the job exists and is escrowed; the dashboard's first live state
 
     // Resolve the seller-facing brief (Option C) in-memory and attach it to the job we dispatch, so the
     // transport can carry it in the envelope. Dispatch is one-shot (the keeper only polls/expires, never
@@ -80,8 +91,8 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     });
 
     if (ok) {
-      await store.markDispatched(input.jobId);
-      await store.markAwaiting(input.jobId);
+      if (await store.markDispatched(input.jobId)) emit(input.workId, 'DISPATCHED');
+      if (await store.markAwaiting(input.jobId)) emit(input.workId, 'AWAITING_DELIVERY');
     } else {
       // Dispatch exhausted — the job stays FUNDED (funds locked). The keeper refunds the buyer via
       // refundExpired at the deadline; funds are never stranded.
@@ -114,7 +125,8 @@ export function makeEngine(deps: EngineDeps): JobEngine {
 
     // Single-shot delivery lock — a duplicate callback/poll loses the race and no-ops (idempotent).
     if (!(await store.claimDelivery(job.jobId, artifact))) return;
-    await store.markVerifying(job.jobId);
+    emit(job.workId, 'DELIVERED');
+    if (await store.markVerifying(job.jobId)) emit(job.workId, 'VERIFYING');
 
     const task = await getTask(job.workId);
     if (!task) { await store.recordJobError(job.jobId, 'task row missing for delivered job'); return; }
@@ -124,7 +136,9 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     // confirms leaves the job non-terminal for the keeper to expire at the deadline.
     const result = await verify(task, artifact);
     if (result.txHash) {
-      await store.markSettled(job.jobId, result.outcome as Outcome, result.txHash);
+      if (await store.markSettled(job.jobId, result.outcome as Outcome, result.txHash)) {
+        emit(job.workId, outcomeToState(result.outcome as Outcome)); // SETTLED or ABSTAINED per the label
+      }
       // NOTE: the post-settle ERC-8004 attestation fires inside verify() (orchestrator.runVerdict) —
       // the single chokepoint both this async path and the sync /verdict route settle through — so it
       // is NOT re-fired here. It is fire-and-forget and off the money path by construction.
@@ -144,6 +158,7 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     // avoids doomed txs. refundExpired refunds the buyer via their route.
     const txHash = await refundExpiredOnChain(job.workId);
     const ok = await store.markExpired(jobId, txHash);
+    if (ok) emit(job.workId, 'EXPIRED'); // no-show refund landed; dashboard shows the terminal truth
     return { expired: ok, txHash, reason: ok ? undefined : 'raced to terminal' };
   }
 

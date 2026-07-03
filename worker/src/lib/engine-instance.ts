@@ -10,6 +10,7 @@ import { refundExpiredOnChain } from '../settlement/expire.js';
 import { makeEngine } from './job-engine.js';
 import type { JobStore } from './job-engine.js';
 import { startKeeper } from './keeper.js';
+import { sseBus } from './sse-bus.js';
 
 // Production job engine, wired to the real store / generic seller adapter / verdict engine / on-chain
 // refund. A single shared instance so the jobs routes, the callback router, and the keeper all drive
@@ -56,6 +57,9 @@ export const engine = makeEngine({
   verify: runVerdict,
   getTask,
   refundExpiredOnChain,
+  // WS8: publish every won job-state transition on the same per-workId SSE channel the courtroom uses,
+  // so the returnable dashboard streams the live lifecycle (and replays it on late connect).
+  emit: (workId, state) => sseBus.publish(workId, 'job_state', { state }),
   // NOTE: post-settle ERC-8004 attestation fires inside runVerdict (the single settle chokepoint),
   // not here — so both the async job path and the sync /verdict route are covered by construction.
   now: () => Date.now(),
