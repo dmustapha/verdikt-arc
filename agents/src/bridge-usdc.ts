@@ -37,6 +37,7 @@ const line = (s = '') => console.log(s);
 const ERC20_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
 // CCTP V2 plain depositForBurn (the hook variant adds a trailing bytes hookData; this omits it).
@@ -87,6 +88,18 @@ async function bridgeOne(account: Account, src: ChainInfo, dest: ChainInfo, amou
     data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [TOKEN_MESSENGER_V2, amount] }),
   });
   await pub.waitForTransactionReceipt({ hash: approveTx, timeout: 120_000 });
+
+  // Confirm the fresh allowance is visible before burning. Public testnet RPCs are load-balanced;
+  // the burn's gas estimate can race a lagging node that still reads allowance 0 → the depositForBurn
+  // transferFrom reverts with "ERC20: transfer amount exceeds allowance". Poll until the node agrees.
+  for (let i = 0; ; i++) {
+    const seen = (await pub.readContract({
+      address: src.usdc, abi: ERC20_ABI, functionName: 'allowance', args: [account.address, TOKEN_MESSENGER_V2],
+    })) as bigint;
+    if (seen >= amount) break;
+    if (i >= 30) throw new Error(`allowance not visible on ${src.name} after approve (saw ${seen})`);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 
   line(`  burn on ${src.name} (domain ${src.cctpDomain}) → mint to payer on ${dest.name} (domain ${dest.cctpDomain})…`);
   const burnTx = await wallet.sendTransaction({
