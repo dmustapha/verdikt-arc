@@ -7,7 +7,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from '../lib/chains.js';
 import { VERDIKT_ESCROW_ABI } from '../settlement/escrow-abi.js';
 import { USDC_DOMAIN, RECEIVE_TYPES } from '../settlement/fund-escrow.js';
-import { getTask } from '../lib/db.js';
+import { getTask, recordFunded } from '../lib/db.js';
 import { readEscrowOnChain } from '../settlement/escrow-read.js';
 import { createRateLimiter, clientIp } from '../lib/rate-limit.js';
 
@@ -161,6 +161,10 @@ relayerRouter.post('/relayer/fund', async (req, res) => {
     const hash = await wallet.sendTransaction({ to: escrow, data });
     const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status !== 'success') { res.status(502).json({ error: 'fund tx reverted on-chain' }); return; }
+    // Record the fund tx to vk_escrows (as the agent-buyer path does), so the human-path escrow shows
+    // in the ledger and the WS8 dashboard has its fund proof link. Best-effort: the money already moved
+    // on-chain, so a DB hiccup must not turn a successful fund into a 502.
+    await recordFunded(f.workId, hash).catch((e) => console.error(`[relayer] recordFunded failed for ${f.workId}: ${e instanceof Error ? e.message : String(e)}`));
     res.status(200).json({ fundTx: hash, relayer: relayer.address });
   } catch (err) {
     res.status(502).json({ error: 'relayer submission failed', detail: err instanceof Error ? err.message : String(err) });
