@@ -6,9 +6,45 @@
 // Readbacks POLL (Base Sepolia's public RPC load-balances → a fresh write can read stale).
 //
 // Run: set -a; . ./.env; set +a; npx tsx worker/src/scripts/verify-gate-d1.ts <requestHash> [<requestHash> ...]
-import { keccak256, toBytes, getAddress } from 'viem';
+import { createPublicClient, http, keccak256, toBytes, getAddress } from 'viem';
+import { baseSepolia } from 'viem/chains';
 import { readValidationStatus } from '../lib/erc8004.js';
-import { BASE_SEPOLIA_EXPLORER_ADDR } from '../lib/erc8004-constants.js';
+import { ERC8004_VALIDATION_REGISTRY, BASE_SEPOLIA_EXPLORER_ADDR } from '../lib/erc8004-constants.js';
+
+// getValidationStatus does NOT expose responseURI (it's event-only), so read the ValidationResponse
+// event to confirm the on-chain URI literally points at the served evidence bundle.
+const VALIDATION_RESPONSE_EVENT = [{
+  type: 'event', name: 'ValidationResponse', inputs: [
+    { name: 'validatorAddress', type: 'address', indexed: true },
+    { name: 'agentId', type: 'uint256', indexed: true },
+    { name: 'requestHash', type: 'bytes32', indexed: true },
+    { name: 'response', type: 'uint8', indexed: false },
+    { name: 'responseURI', type: 'string', indexed: false },
+    { name: 'responseHash', type: 'bytes32', indexed: false },
+    { name: 'tag', type: 'string', indexed: false },
+  ],
+}] as const;
+
+const evClient = createPublicClient({ chain: baseSepolia, transport: http((process.env.BASE_SEPOLIA_RPC_URL ?? 'https://sepolia.base.org').trim()) });
+
+// Read the on-chain responseURI for a requestHash. Public RPCs cap eth_getLogs at a 2000-block range,
+// so page backward in 2000-block windows (up to ~34h) until the event is found. Returns null if not
+// found in-range (older attestation) — the caller notes it rather than failing the gate.
+async function onChainResponseURI(requestHash: `0x${string}`): Promise<string | null> {
+  const SPAN = 2000n, MAX_PAGES = 60n;
+  let hi = await evClient.getBlockNumber();
+  for (let page = 0n; page < MAX_PAGES; page++) {
+    const lo = hi > SPAN ? hi - SPAN + 1n : 0n;
+    const logs = await evClient.getContractEvents({
+      address: ERC8004_VALIDATION_REGISTRY, abi: VALIDATION_RESPONSE_EVENT, eventName: 'ValidationResponse',
+      args: { requestHash }, fromBlock: lo, toBlock: hi,
+    });
+    if (logs.length) return (logs[logs.length - 1] as any).args.responseURI as string;
+    if (lo === 0n) break;
+    hi = lo - 1n;
+  }
+  return null;
+}
 
 const WORKER = (process.env.WORKER_PUBLIC_URL ?? 'https://verdikt-worker.fly.dev').replace(/\/+$/, '');
 const VALIDATOR = getAddress(process.env.ERC8004_ATTESTOR_ADDRESS ?? '0xD089Dfc911ea0A5cA7A54ff912ab73B5531D02D7');
@@ -46,9 +82,19 @@ async function verifyOne(requestHash: `0x${string}`): Promise<boolean> {
   console.log(`    keccak256(served) == on-chain responseHash: ${okHash}`);
   console.log(`    Arc settlement tx in bundle: ${okArc} (${arcTx})`);
   console.log(`    outcome=${bundle.outcome} verdict=${bundle.verdict} response=${bundle.response}`);
+
+  // 4. The on-chain ValidationResponse event's responseURI must literally point at the served bundle.
+  const onchainURI = await onChainResponseURI(requestHash);
+  let okURI = true;
+  if (onchainURI === null) {
+    console.log(`    on-chain responseURI: (not in recent block window — skipped)`);
+  } else {
+    okURI = onchainURI === url;
+    console.log(`    on-chain responseURI == served URL: ${okURI} (${onchainURI})`);
+  }
   console.log(`    validation on explorer: ${BASE_SEPOLIA_EXPLORER_ADDR}0x8004Cb1BF31DAf7788923b405b754f57acEB4272`);
 
-  const ok = okValidator && okAgent && okTag && okHash && okArc;
+  const ok = okValidator && okAgent && okTag && okHash && okArc && okURI;
   console.log(`  ${ok ? '✓ PASS' : '✗ FAIL'} for ${requestHash}`);
   return ok;
 }
