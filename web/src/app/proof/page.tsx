@@ -4,6 +4,7 @@ import { readOnchainEscrow, getTxGasUsdc } from '../../lib/escrow-read';
 import { hashEvidence } from '../../lib/hash';
 import { SiteNav } from '../components/SiteNav';
 import { SiteFooter } from '../components/SiteFooter';
+import { CORRIDORS } from './corridors';
 
 export const dynamic = 'force-dynamic';
 
@@ -146,6 +147,38 @@ export default async function ProofPage() {
                 ))}
               </ul>
             )}
+          </div>
+
+          {/* WS9 — >=6-corridor CCTP matrix (Gate F1). Seller on ANY chain is paid on THEIR
+              chain; Arc is only the clearing house. Each corridor is a full 4-leg round-trip with
+              the dest payout verified fee-net on-chain, both directions, across all five chains. */}
+          <div className="pf-card">
+            <div className="pf-label">Cross-chain corridor matrix ({CORRIDORS.length}) — paid on your home chain</div>
+            <p className="pf-muted" style={{ marginBottom: 12 }}>
+              Every corridor is a live CCTP V2 round-trip: <strong>burn</strong> on the source →{' '}
+              <strong>mint + fund</strong> the escrow on Arc → <strong>settle + payout burn</strong> on Arc →{' '}
+              <strong>paid</strong> on the destination. The seller&apos;s destination-chain balance rose by exactly the
+              fee-net bounty, asserted on-chain against the escrow (independent of any database). All five chains
+              appear as both a source and a destination.
+            </p>
+            {CORRIDORS.map((c) => (
+              <div key={c.id} style={{ marginBottom: 14 }}>
+                <div className="pf-meta" style={{ marginBottom: 6 }}>
+                  <strong>{c.source} → {c.dest}</strong>{' '}
+                  <span className="pf-amt">(seller +{c.feeNetUsdc} USDC, fee-net verified)</span>
+                </div>
+                <ul className="pf-list">
+                  {c.legs.map((leg) => (
+                    <li key={leg.url} className="pf-row">
+                      <span className="pf-meta">{leg.label} · {leg.chain}</span>
+                      <a className="pf-tx" href={leg.url} target="_blank" rel="noreferrer">
+                        {leg.url.split('/tx/')[1]?.slice(0, 12)}… ↗
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </section>
       </main>
