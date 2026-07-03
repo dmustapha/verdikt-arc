@@ -147,8 +147,11 @@ async function main() {
     const dest = chainInfo(t.dest);
     const have = await usdcBalance(dest, account.address);
     const target = parseUnits(t.amountUsdc.toFixed(6), 6);
-    if (have >= target) {
-      line(`· ${dest.name}: already funded (${formatUnits(have, 6)} USDC ≥ ${t.amountUsdc}) — skip`);
+    // Fast Transfer skims a variable fee, so a funded chain lands slightly under `target`
+    // (e.g. 0.699909 for a 0.7 send). Tolerate 1% so a re-run doesn't needlessly re-bridge.
+    const fundedFloor = (target * 99n) / 100n;
+    if (have >= fundedFloor) {
+      line(`· ${dest.name}: already funded (${formatUnits(have, 6)} USDC ≈ ${t.amountUsdc}) — skip`);
       continue;
     }
     line(`· ${dest.name}: has ${formatUnits(have, 6)} USDC, bridging ${t.amountUsdc}…`);
