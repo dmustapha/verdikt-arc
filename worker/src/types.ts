@@ -146,7 +146,10 @@ export interface SignedReceipt {
 export type SSEType =
   | 'task_funded' | 'artifact_received' | 'route_selected'
   | 'evidence_item' | 'verdict' | 'settling' | 'settled'
-  | 'receipt' | 'error';
+  | 'receipt' | 'error'
+  // WS8 async-job-dashboard lifecycle: one event per WON job-state transition (job-engine), so a
+  // returning dashboard reconstructs the full state machine from the SSE history replay.
+  | 'job_state';
 
 export interface SSEEvent {
   type: SSEType;
