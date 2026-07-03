@@ -51,6 +51,14 @@ describe('attestSettlement', () => {
     expect(openValidationRequest).not.toHaveBeenCalled();
   });
 
+  it('an OPEN-but-unanswered request is NOT skipped — it proceeds to post the response', async () => {
+    // tag='' + zero responseHash + lastUpdate>0 = a request opened whose response failed earlier.
+    (readValidationStatus as any).mockResolvedValueOnce({ validatorAddress: CFG.validator, agentId: 7395n, response: 0, responseHash: '0x' + '00'.repeat(32), tag: '', lastUpdate: 999n });
+    const r = await attestSettlement(T, V, S(), CFG);
+    expect(r.status).toBe('attested');
+    expect(postValidationResponse).toHaveBeenCalledOnce();
+  });
+
   it('NEVER throws — an on-chain failure surfaces as {status:error}, not an exception', async () => {
     (openValidationRequest as any).mockRejectedValueOnce(new Error('rpc exploded'));
     const r = await attestSettlement(T, V, S(), CFG);
