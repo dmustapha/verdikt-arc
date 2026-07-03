@@ -29,15 +29,20 @@ export function lifecycleIndex(state: string): number {
     case 'AWAITING_DELIVERY': return 1;
     case 'DELIVERED': return 2;
     case 'VERIFYING': return 3;
+    // WS11 dispute branch: the verdict is held/contested after verifying but before it settles.
+    case 'PROPOSED':
+    case 'DISPUTED':
+    case 'ESCALATED': return 3;
     case 'SETTLED':
     case 'ABSTAINED':
-    case 'EXPIRED': return 4;
+    case 'EXPIRED':
+    case 'RESOLVED': return 4;
     default: return 0;
   }
 }
 
 export function isTerminal(state: string): boolean {
-  return state === 'SETTLED' || state === 'ABSTAINED' || state === 'EXPIRED';
+  return state === 'SETTLED' || state === 'ABSTAINED' || state === 'EXPIRED' || state === 'RESOLVED';
 }
 
 // How far the job ACTUALLY progressed along the linear timeline (0..3), used to mark completed steps.
@@ -63,6 +68,16 @@ export function stateLabel(state: string, outcome: string | null): string {
     case 'VERIFYING': return 'Verifying';
     case 'ABSTAINED': return 'Refunded (abstain)';
     case 'EXPIRED': return 'Refunded (expired)';
+    // WS11 dispute branch.
+    case 'PROPOSED': return 'Proposed (challenge window)';
+    case 'DISPUTED': return 'Disputed';
+    case 'ESCALATED': return 'In arbitration';
+    case 'RESOLVED':
+      if (outcome === 'release') return 'Resolved (released)';
+      if (outcome === 'refund') return 'Resolved (refunded)';
+      if (outcome === 'partial') return 'Resolved (partial)';
+      if (outcome === 'abstain') return 'Resolved (refunded)';
+      return 'Resolved';
     case 'SETTLED':
       if (outcome === 'release') return 'Released';
       if (outcome === 'refund') return 'Refunded';
@@ -75,12 +90,13 @@ export function stateLabel(state: string, outcome: string | null): string {
 export type ChipTone = 'good' | 'warn' | 'bad' | 'live' | 'idle';
 
 export function stateTone(state: string, outcome: string | null): ChipTone {
-  if (state === 'SETTLED') {
+  if (state === 'SETTLED' || state === 'RESOLVED') {
     if (outcome === 'release') return 'good';
     if (outcome === 'partial') return 'warn';
-    return 'warn'; // refund
+    return 'warn'; // refund / abstain
   }
   if (state === 'ABSTAINED' || state === 'EXPIRED') return 'warn';
-  if (state === 'VERIFYING' || state === 'DELIVERED') return 'live';
+  if (state === 'DISPUTED') return 'bad';                                  // a contest is in play
+  if (state === 'VERIFYING' || state === 'DELIVERED' || state === 'PROPOSED' || state === 'ESCALATED') return 'live';
   return 'idle'; // FUNDED / DISPATCHED / AWAITING_DELIVERY
 }
