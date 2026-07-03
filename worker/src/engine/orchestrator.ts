@@ -59,23 +59,22 @@ export async function computeVerdict(task: Task, artifact: Artifact): Promise<{ 
   return { verdict, bundle };
 }
 
-export async function runVerdict(task: Task, artifact: Artifact): Promise<VerdictRunResult> {
+// Steps 3–4: settle a GIVEN verdict on-chain, record it, attest, and receipt. runVerdict uses this on
+// the verdict it just computed (the default path); the WS11 dispute path uses it to settle either a
+// finalized (undisputed) proposed verdict OR the arbiter's ruling — always through this ONE money path,
+// so a dispute-resolved settlement records + attests + receipts exactly like a normal one.
+export async function settleGivenVerdict(task: Task, verdict: VerdictResult): Promise<VerdictRunResult> {
   const { workId } = task;
-
-  // 1–2. Evidence + verdict (recorded + streamed), no settlement yet.
-  const { verdict } = await computeVerdict(task, artifact);
-
-  // 3. Settle on-chain (release / refund / abstain-default)
   sseBus.publish(workId, 'settling', { outcome: outcomeFor(verdict) });
   try {
     const settlement = await settleVerdict(workId, verdict);
     await recordSettled(workId, settlement.outcome, settlement.txHash);
     sseBus.publish(workId, 'settled', { outcome: settlement.outcome, txHash: settlement.txHash, bps: settlement.bps });
 
-    // Post-settle ERC-8004 attestation — the SINGLE chokepoint both the sync /verdict route and the
-    // async job path settle through. Best-effort, off the money path, fire-and-forget (never awaited,
-    // never throws): it adds zero latency to the verdict response and a Base Sepolia failure can never
-    // affect this already-recorded Arc settlement. Env-gated no-op unless the attestor is configured.
+    // Post-settle ERC-8004 attestation — the SINGLE chokepoint the sync /verdict route, the async job
+    // path, AND the dispute-resolution path settle through. Best-effort, off the money path,
+    // fire-and-forget (never awaited, never throws): it adds zero latency and a Base Sepolia failure can
+    // never affect this already-recorded Arc settlement. Env-gated no-op unless the attestor is configured.
     void attestAfterSettle(task, verdict, settlement);
 
     // 4. Receipt
@@ -90,4 +89,11 @@ export async function runVerdict(task: Task, artifact: Artifact): Promise<Verdic
     sseBus.publish(workId, 'error', { stage: 'settlement', message: msg });
     return { verdict, outcome: outcomeFor(verdict), txHash: null, error: msg };
   }
+}
+
+export async function runVerdict(task: Task, artifact: Artifact): Promise<VerdictRunResult> {
+  // 1–2. Evidence + verdict (recorded + streamed), no settlement yet.
+  const { verdict } = await computeVerdict(task, artifact);
+  // 3–4. Settle that verdict on-chain (release / refund / abstain-default), record, attest, receipt.
+  return settleGivenVerdict(task, verdict);
 }
