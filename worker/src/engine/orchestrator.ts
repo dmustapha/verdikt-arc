@@ -34,7 +34,12 @@ async function routeArtifact(task: Task, artifact: Artifact): Promise<EvidenceBu
   }
 }
 
-export async function runVerdict(task: Task, artifact: Artifact): Promise<VerdictRunResult> {
+// Steps 1–2 of a verdict: route the artifact into evidence and reason over it into a verdict, recording
+// both and streaming the courtroom SSE — WITHOUT settling on-chain. runVerdict (the default path)
+// composes this then settles immediately; the WS11 dispute path calls this alone to HOLD a verdict in
+// PROPOSED (funds stay FUNDED) so a party can contest it before any money moves. The returned bundle is
+// the arbiter's factual basis if the verdict is later disputed.
+export async function computeVerdict(task: Task, artifact: Artifact): Promise<{ verdict: VerdictResult; bundle: EvidenceBundle }> {
   const { workId } = task;
   sseBus.publish(workId, 'route_selected', { route: task.type });
 
@@ -50,6 +55,15 @@ export async function runVerdict(task: Task, artifact: Artifact): Promise<Verdic
     verdict: verdict.verdict, confidence: verdict.confidence,
     citedEvidence: verdict.citedEvidence, abstainReason: verdict.abstainReason,
   });
+
+  return { verdict, bundle };
+}
+
+export async function runVerdict(task: Task, artifact: Artifact): Promise<VerdictRunResult> {
+  const { workId } = task;
+
+  // 1–2. Evidence + verdict (recorded + streamed), no settlement yet.
+  const { verdict } = await computeVerdict(task, artifact);
 
   // 3. Settle on-chain (release / refund / abstain-default)
   sseBus.publish(workId, 'settling', { outcome: outcomeFor(verdict) });
