@@ -7,6 +7,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { tryRouter } from './routes/try.js';
 import { jobsRouter } from './routes/jobs.js';
 import { relayerRouter } from './routes/relayer.js';
+import { faucetRouter } from './routes/faucet.js';
 import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
 import { evidenceRouter } from './routes/evidence.js';
@@ -40,6 +41,8 @@ app.use(tryRouter);
 app.use(jobsRouter);
 // WS7: gasless relayer — submits a human's pre-signed EIP-3009 authorization so the human pays no gas.
 app.use(relayerRouter);
+// WS7: ERC-20 USDC faucet so a fresh browser wallet can get test USDC to escrow (gas-free path).
+app.use(faucetRouter);
 // ERC-8004 evidence bundles (public, read-only) — the responseURI a validationResponse points at.
 app.use(evidenceRouter);
 // Seller registry: register (validate → probe → store healthy/unhealthy) + list the healthy catalog.

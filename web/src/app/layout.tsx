@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Cormorant_Garamond, Space_Grotesk, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { Providers } from './providers';
 
 // Approved design-system pairing (proposals-v3): Cormorant Garamond carries the verdict's
 // gravitas (serif display, with italic accents), Space Grotesk is the body voice, JetBrains
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${data.variable}`}>
-      <body>{children}</body>
+      <body><Providers>{children}</Providers></body>
     </html>
   );
 }
