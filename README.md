@@ -186,8 +186,8 @@ The deterministic floor and the three routes ship with stronger, evidence-ground
 ## Smart Contracts
 | Contract | Address | Chain | Description |
 |----------|---------|-------|-------------|
-| `VerdiktEscrow` | `0x4e1a423815294DFD1903D849D4BE84e3391Ea771` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
-| `EscrowFundingHook` | `0x12201dc290c6B1646C5d649C9051D7cC50eFcde1` | Arc testnet (5042002) | CCTP V2 wrapper — turns a cross-chain USDC transfer into a funded escrow atomically |
+| `VerdiktEscrow` | `0x96c47a608218E1aFea36E37f9619FB83E24CDF77` | Arc testnet (5042002) | Holds the escrow, settles release/refund/abstain, anchors `keccak256(evidence)` on-chain |
+| `EscrowFundingHook` | `0x34DdEB22529841692C9EF3BcE5475F995a4DcEF1` | Arc testnet (5042002) | CCTP V2 wrapper — turns a cross-chain USDC transfer into a funded escrow atomically |
 
 ## On-Chain Verification
 Every settlement is a real Arc transaction that moves USDC. The full set from the live deep-test run on the deployed contract (explorer: `testnet.arcscan.app`), each confirmed `status=0x1`:
@@ -200,7 +200,7 @@ Every settlement is a real Arc transaction that moves USDC. The full set from th
 | Schema valid | pass | release (worker) | `0xbb8dd91094002823b4a8b9afe76ac7567e5fcb2e6240e9975b6fa478acb78e37` |
 | Schema invalid | fail | refund (payer) | `0xce19d852a0fd3984ae9674b4fe217f997893d83d80a0f71835bc15788aa303c2` |
 
-Contract deployed at `0x4e1a423815294DFD1903D849D4BE84e3391Ea771` (deploy tx `0xef978ee7e5ad186fd43ff886928af6b4b05587df77fac761e5ce42e590da50d5`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
+Contract deployed at `0x96c47a608218E1aFea36E37f9619FB83E24CDF77` (deploy tx `0xef978ee7e5ad186fd43ff886928af6b4b05587df77fac761e5ce42e590da50d5`). The escrow's `getEscrow(workId).evidenceHash` equals the signed receipt hash equals `keccak256` of the stored evidence bundle, so any verdict is independently verifiable. The `/proof` page recomputes this hash live in the browser and shows it equal to the on-chain anchor.
 
 ## Cross-Chain Settlement — any chain in, any chain out
 

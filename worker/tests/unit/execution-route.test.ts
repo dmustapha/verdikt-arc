@@ -8,7 +8,7 @@ import { runExecutionRoute, type ChainReader, type ExecTx } from '../../src/engi
 import type { Acceptance, Artifact, ExecutionCriteria } from '../../src/types.js';
 
 const ARC = 5042002;
-const ESCROW = '0x4e1a423815294DFD1903D849D4BE84e3391Ea771' as const;
+const ESCROW = '0x96c47a608218E1aFea36E37f9619FB83E24CDF77' as const;
 const SENDER = '0x973eA2c67D8d10e8C41e23be283b6CCb31a5686c' as const;
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef' as const; // Transfer(a,a,u)
 const HASH = '0x6da4a716383dbbf081fc2d529c02e607bede4a2050a81f3f76fff27a867bdd19' as const; // real Arc tx
