@@ -9,7 +9,7 @@ import { runExecutionRoute } from '../engine/execution-route.js';
 import type { Acceptance, Artifact } from '../types.js';
 
 const ARC = 5042002;
-const ESCROW = (process.env.ESCROW_ADDRESS ?? '0x4e1a423815294DFD1903D849D4BE84e3391Ea771') as `0x${string}`;
+const ESCROW = (process.env.ESCROW_ADDRESS ?? '0x96c47a608218E1aFea36E37f9619FB83E24CDF77') as `0x${string}`;
 // The real settlePartial tx from the tier proof — to = escrow, status success.
 const REAL_TX = '0x6da4a716383dbbf081fc2d529c02e607bede4a2050a81f3f76fff27a867bdd19';
 const FAKE_TX = '0x' + 'de'.repeat(32);
