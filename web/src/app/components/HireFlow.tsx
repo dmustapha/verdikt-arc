@@ -69,7 +69,8 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
 
   const esRef = useRef<EventSource | null>(null);
   const runningRef = useRef(false);
-  useEffect(() => () => esRef.current?.close(), []);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { esRef.current?.close(); if (watchdogRef.current) clearTimeout(watchdogRef.current); }, []);
 
   const config = selected ? CAPABILITY_CONFIG[selected.capability] : null;
 
@@ -80,7 +81,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
     setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null); setError(null); setStatus('idle');
   }
   const push = (s: Step) => setSteps((cur) => [...cur, s]);
-  function stop() { runningRef.current = false; setBusy(false); esRef.current?.close(); }
+  function stop() { runningRef.current = false; setBusy(false); esRef.current?.close(); if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; } }
 
   async function faucet() {
     if (!address) return;
@@ -173,6 +174,14 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
       if (!jRes.ok) throw new Error((await jRes.json().catch(() => ({}))).error ?? 'dispatch failed');
       setStatus('agent working…'); push({ key: 'awaiting', text: 'Agent is working — the verdict will settle automatically.', tone: 'neutral' });
       setBusy(false); // funding done; the async verdict/settle streams over SSE
+      // Watchdog: if no verdict streams back in time (dead stream / slow or no-show seller), tell the
+      // user the truth — the escrow is safe and auto-refunds at its deadline — instead of hanging.
+      // A verdict (settled) or error calls stop(), which clears this timer — so if it fires, none arrived.
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      watchdogRef.current = setTimeout(() => {
+        push({ key: 'watchdog', text: 'No verdict yet — the agent may be slow or unreachable. Your escrow is safe and auto-refunds at its deadline; refresh to check later.', tone: 'warn' });
+        setStatus('no verdict yet'); stop();
+      }, 150_000);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       // A rejected signature is a normal user action, not a failure.

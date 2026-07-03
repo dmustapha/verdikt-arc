@@ -24,7 +24,9 @@ faucetRouter.post('/faucet', async (req, res) => {
   const ipLimited = perIp(clientIp(req), Date.now());
   if (ipLimited) { res.status(429).json({ error: ipLimited }); return; }
 
-  const faucetKey = process.env.DEMO_PAYER_KEY as `0x${string}` | undefined;
+  // Dedicated, LOW-balance faucet key — decoupled from the settlement/demo key so a public faucet can
+  // never drain funds that matter (funds-key lesson). Falls back to DEMO_PAYER_KEY only if unset.
+  const faucetKey = (process.env.FAUCET_KEY ?? process.env.DEMO_PAYER_KEY) as `0x${string}` | undefined;
   if (!faucetKey) { res.status(503).json({ error: 'faucet disabled: not configured' }); return; }
 
   const address = (req.body?.address ?? '') as string;
