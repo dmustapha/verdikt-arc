@@ -72,6 +72,13 @@ export async function recordEvidence(workId: string, bundle: EvidenceBundle): Pr
     ON CONFLICT (work_id) DO UPDATE SET bundle = ${JSON.stringify(bundle)}`;
 }
 
+// WS11 — the recorded evidence bundle a verdict was reasoned over. The (mocked) arbiter re-reads it as
+// its ONLY factual basis when a disputed verdict is escalated. Null before evidence is recorded.
+export async function getEvidence(workId: string): Promise<EvidenceBundle | null> {
+  const r = await sql`SELECT bundle FROM vk_evidence WHERE work_id = ${workId} LIMIT 1`;
+  return r.rows.length ? (r.rows[0].bundle as EvidenceBundle) : null;
+}
+
 // WS6 — ERC-8004 evidence, keyed by requestHash. bundle_json stored/returned as the EXACT bytes so
 // keccak256(json) still equals the on-chain responseHash after a round-trip through the DB.
 export async function insertErc8004Evidence(requestHash: string, responseHash: string, bundleJson: string): Promise<void> {
