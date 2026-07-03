@@ -81,6 +81,19 @@ export async function getJobByWorkId(workId: string): Promise<JobRow | null> {
   return r.rows.length ? toRow(r.rows[0] as JobDbRow) : null;
 }
 
+// WS8 dashboard: every job a given buyer funded, newest first. Joins vk_jobs to vk_tasks on the payer
+// (the escrow payer, public on-chain — so this leaks nothing). Case-insensitive on the address. Bounded
+// so a payer with a huge history can't force an unbounded scan. Read-only; never fabricates a job.
+export async function listByPayer(payer: string): Promise<JobRow[]> {
+  const r = await sql`
+    SELECT j.* FROM vk_jobs j
+    JOIN vk_tasks t ON t.work_id = j.work_id
+    WHERE lower(t.payer) = lower(${payer})
+    ORDER BY j.created_at DESC
+    LIMIT 100`;
+  return r.rows.map((row) => toRow(row as JobDbRow));
+}
+
 export async function listByState(states: JobState[]): Promise<JobRow[]> {
   // pg array literal for = ANY(...): '{A,B}'
   const arr = `{${states.join(',')}}`;

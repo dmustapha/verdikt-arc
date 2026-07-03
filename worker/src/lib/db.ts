@@ -97,6 +97,41 @@ export async function recordVerdict(workId: string, v: VerdictResult): Promise<v
       rationale = ${v.rationale}, abstain_reason = ${v.abstainReason ?? null}, evidence_hash = ${v.evidenceHash}`;
 }
 
+// WS8 dashboard read: the recorded verdict for a job's result view (null before the verdict is in).
+// Read-only projection of vk_verdicts — the same row recordVerdict wrote after settlement.
+export interface VerdictView {
+  verdict: string; verdictCode: number; confidence: number | null; route: string;
+  rationale: string | null; abstainReason: string | null; evidenceHash: string; citedEvidence: unknown;
+}
+export async function getVerdict(workId: string): Promise<VerdictView | null> {
+  const r = await sql`SELECT * FROM vk_verdicts WHERE work_id = ${workId} LIMIT 1`;
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  return {
+    verdict: row.verdict as string,
+    verdictCode: row.verdict_code as number,
+    confidence: row.confidence === null ? null : parseFloat(row.confidence as string),
+    route: row.route as string,
+    rationale: (row.rationale as string) ?? null,
+    abstainReason: (row.abstain_reason as string) ?? null,
+    evidenceHash: row.evidence_hash as string,
+    citedEvidence: row.cited_evidence,
+  };
+}
+
+// WS8 dashboard read: the escrow's recorded tx hashes for per-job proof links (fund + settle). This is
+// the DB mirror; the on-chain cross-check (readEscrowOnChain) is the independent source of truth.
+export async function getEscrowMeta(workId: string): Promise<{ fundTxHash: string | null; settleTxHash: string | null; status: string | null; outcome: string | null } | null> {
+  const r = await sql`SELECT fund_tx_hash, settle_tx_hash, status, outcome FROM vk_escrows WHERE work_id = ${workId} LIMIT 1`;
+  if (r.rows.length === 0) return null;
+  return {
+    fundTxHash: (r.rows[0].fund_tx_hash as string) ?? null,
+    settleTxHash: (r.rows[0].settle_tx_hash as string) ?? null,
+    status: (r.rows[0].status as string) ?? null,
+    outcome: (r.rows[0].outcome as string) ?? null,
+  };
+}
+
 export async function recordSettled(workId: string, outcome: Outcome, settleTxHash: string): Promise<void> {
   const r = await sql`UPDATE vk_escrows SET status = 'settled', outcome = ${outcome}, settle_tx_hash = ${settleTxHash} WHERE work_id = ${workId}`;
   // Affected-row guard (debug Phase 8): a 0-row update means an on-chain settle has no
