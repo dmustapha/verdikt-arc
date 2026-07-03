@@ -40,6 +40,20 @@ export function isTerminal(state: string): boolean {
   return state === 'SETTLED' || state === 'ABSTAINED' || state === 'EXPIRED';
 }
 
+// How far the job ACTUALLY progressed along the linear timeline (0..3), used to mark completed steps.
+// For most states this is just lifecycleIndex. The exception is EXPIRED (no-show): a job that expired
+// before the seller delivered never reached DELIVERED/VERIFYING, so claiming those steps as done would
+// be an optimistic lie. We infer the true furthest step from the evidence that survives on the job —
+// a recorded verdict ⇒ it was verified; a stored artifact ⇒ it was delivered; neither ⇒ only awaited.
+export function reachedStep(state: string, hasArtifact: boolean, hasVerdict: boolean): number {
+  if (state === 'EXPIRED') {
+    if (hasVerdict) return 3;   // reached VERIFYING (rare: verified but the settle never confirmed)
+    if (hasArtifact) return 2;  // reached DELIVERED (delivered, but expired before settling)
+    return 1;                   // true no-show: got no further than awaiting delivery
+  }
+  return lifecycleIndex(state);
+}
+
 export function stateLabel(state: string, outcome: string | null): string {
   switch (state) {
     case 'FUNDED': return 'Escrowed';

@@ -26,6 +26,10 @@ const rateLimit = createRateLimiter({ perIp: JOBS_PER_IP, ipWindowMs: 10 * 60 * 
 // /expire is unauthenticated (it only ever refunds the buyer), but each call is a DB read + a possible
 // on-chain tx — rate-limit per IP so it can't be used to spam doomed refundExpired attempts.
 const expireRateLimit = createRateLimiter({ perIp: Number(process.env.EXPIRE_PER_IP ?? 30), ipWindowMs: 10 * 60 * 1000 });
+// The detail view does a DB read + an on-chain escrow read per call; a dashboard legitimately fetches
+// it a handful of times per job (mount + a couple of SSE-triggered refetches), so the cap is generous
+// but still bounds RPC amplification if a leaked jobId is hammered.
+const detailRateLimit = createRateLimiter({ perIp: Number(process.env.JOB_DETAIL_PER_IP ?? 200), ipWindowMs: 10 * 60 * 1000 });
 
 // POST /api/jobs — start the async lifecycle for an ALREADY-FUNDED escrow. The escrow must be funded
 // on-chain (the payer funds it separately via EIP-3009) and its task registered via /api/tasks; this
@@ -122,6 +126,9 @@ jobsRouter.get('/api/jobs', async (req, res) => {
 // so it acts as a per-job capability token: only someone with it (the buyer / their tracked link) sees
 // the artifact + verdict. Every field is a read of a source of truth — nothing is invented here.
 jobsRouter.get('/api/jobs/:id', async (req, res) => {
+  const limited = detailRateLimit(clientIp(req), Date.now());
+  if (limited) { res.status(429).json({ error: limited }); return; }
+
   const job = await getJob(req.params.id);
   if (!job) { res.status(404).json({ error: 'unknown job' }); return; }
 
