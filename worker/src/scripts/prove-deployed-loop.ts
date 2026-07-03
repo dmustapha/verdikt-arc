@@ -95,6 +95,13 @@ async function main() {
     // The bounty stays escrow-gated and is released only by the verdict — x402 is transport, not settlement.
     { skill: 'research', label: 'X402-RESEARCH-RELEASE', route: 'answer', expect: 'release', sellerUrl: X402_URL, protocol: 'x402',
       acceptance: { spec: 'What is the capital of France, and what river runs through it?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
+    // x402 NEGATIVE: an ungroundable question — the seller honestly refuses → verdict abstains → refund.
+    // Proves the x402 rail's honesty (not just the release path); the toll is still paid, only the bounty refunds.
+    { skill: 'research', label: 'X402-RESEARCH-REFUND', route: 'answer', expect: 'not-release', sellerUrl: X402_URL, protocol: 'x402',
+      acceptance: { spec: 'What is the population of Tokyo?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
+    // A2A NEGATIVE: same honesty proof for the A2A dispatch path.
+    { skill: 'research', label: 'A2A-RESEARCH-REFUND', route: 'answer', expect: 'not-release', sellerUrl: A2A_URL, protocol: 'a2a',
+      acceptance: { spec: 'What is the population of Tokyo?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
     // A2A DISPATCH path: the worker's a2aDriver resolves the card at the origin root, message/send's the
     // task, and the keeper polls tasks/get — a standard A2A seller, dispatched live (not just over sockets).
     { skill: 'research', label: 'A2A-RESEARCH-RELEASE', route: 'answer', expect: 'release', sellerUrl: A2A_URL, protocol: 'a2a',
