@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { txUrl, addressUrl } from '../../lib/chains';
-import { LIFECYCLE, lifecycleIndex, isTerminal, stateLabel, stateTone } from '../../lib/job-state';
+import { LIFECYCLE, reachedStep, isTerminal, stateLabel, stateTone } from '../../lib/job-state';
 
 const WORKER_BASE = process.env.NEXT_PUBLIC_WORKER_URL ?? '';
 const STEP_LABEL = ['Escrowed', 'Awaiting delivery', 'Delivered', 'Verifying', 'Settled'];
@@ -75,7 +75,9 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
   // authoritative outcome (from the settle tx). Never let a stale liveState hide a terminal outcome.
   const state = isTerminal(d.state) ? d.state : (liveState ?? d.state);
   const outcome = d.outcome ?? d.chain?.outcomeLabel ?? null;
-  const stepIdx = lifecycleIndex(state);
+  // The furthest step the job TRULY reached (0..3) — evidence-gated so a no-show EXPIRED job never
+  // shows Delivered/Verifying as completed. The terminal outcome still renders at step 4.
+  const reached = reachedStep(state, !!d.artifact, !!d.verdict);
   const settleTx = d.settleTxHash;
 
   return (
@@ -91,14 +93,18 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
       {/* Truthful lifecycle timeline. */}
       <ol className="jd-timeline" aria-label="Job lifecycle">
         {LIFECYCLE.map((_, i) => {
-          const done = i < stepIdx;
-          const here = i === stepIdx;
-          // The last step reflects the actual terminal tone (released good / refunded warn).
-          const tone = i === 4 && isTerminal(state) ? stateTone(state, outcome) : undefined;
+          const isTermStep = i === 4 && isTerminal(state);
+          // Steps 0..3: "done" once the job reached past them. Step 4 is the terminal marker: it counts
+          // as done (fully-connected line) ONLY when the job truly progressed all the way (reached===4,
+          // e.g. SETTLED/ABSTAINED); for a no-show (reached<4) its connector stays grey, honestly showing
+          // the skipped middle, while data-tone still colours the terminal dot.
+          const done = i < reached || (isTermStep && reached >= 4);
+          const here = i === reached && !isTermStep;
+          const tone = isTermStep ? stateTone(state, outcome) : undefined;
           return (
-            <li key={i} className={`jd-step${done ? ' done' : ''}${here ? ' here' : ''}`} data-tone={tone}>
+            <li key={i} className={`jd-step${done ? ' done' : ''}${here ? ' here' : ''}${isTermStep ? ' term' : ''}`} data-tone={tone}>
               <span className="jd-dot" aria-hidden="true" />
-              <span className="jd-step-label">{i === 4 && isTerminal(state) ? stateLabel(state, outcome) : STEP_LABEL[i]}</span>
+              <span className="jd-step-label">{isTermStep ? stateLabel(state, outcome) : STEP_LABEL[i]}</span>
             </li>
           );
         })}
