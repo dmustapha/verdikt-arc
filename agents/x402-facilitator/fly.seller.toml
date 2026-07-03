@@ -5,12 +5,10 @@ primary_region = "iad"
 
 [env]
   PORT = "8080"
+  APP_ENTRY = "seller"
   X402_FACILITATOR_URL = "https://verdikt-x402-facilitator.fly.dev"
 
-# Same image as the facilitator; the seller entrypoint runs src/seller.ts.
-[processes]
-  app = "npx tsx src/seller.ts"
-
+# Same image as the facilitator; SELLER_ENTRY makes the shared CMD run src/seller.ts.
 [http_service]
   internal_port = 8080
   force_https = true
