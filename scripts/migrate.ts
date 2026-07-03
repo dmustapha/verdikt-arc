@@ -46,6 +46,20 @@ async function migrate() {
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
   await sql`CREATE INDEX IF NOT EXISTS vk_jobs_state_idx ON vk_jobs(state)`;
 
+  // WS11 — dispute/escalation. Added via idempotent ALTERs so existing job rows are preserved. `state`
+  // stays a plain TEXT column (no CHECK enum), so the new PROPOSED/DISPUTED/ESCALATED/RESOLVED values
+  // need NO schema migration — validity is enforced purely by the pure job-machine module. A disputable
+  // job holds settlement in PROPOSED until its challenge window closes; a dispute records who/why and the
+  // (mocked) arbiter's ruling. All nullable/defaulted: pre-WS11 jobs are simply non-disputable.
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS disputable BOOLEAN NOT NULL DEFAULT false`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS challenge_window_ms INT`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS challenge_deadline TIMESTAMPTZ`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS disputed_by TEXT`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS dispute_reason TEXT`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS arbiter_outcome TEXT`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS arbiter_upheld BOOLEAN`;
+  await sql`ALTER TABLE vk_jobs ADD COLUMN IF NOT EXISTS arbiter_rationale TEXT`;
+
   // Replay defense for signed callbacks: a jti (JWT id / per-task id) may be redeemed once. The PK
   // makes the dedupe atomic — a replayed jti fails the INSERT and is rejected upstream.
   await sql`CREATE TABLE IF NOT EXISTS vk_seen_jti (

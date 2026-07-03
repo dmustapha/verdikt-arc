@@ -2,6 +2,7 @@ import { sql } from '@vercel/postgres';
 import type { Artifact, Outcome, SellerBrief } from '../types.js';
 import { outcomeToState } from './job-machine.js';
 import type { JobState } from './job-machine.js';
+import type { DisputeParty, ArbiterOutcome } from './arbiter.js';
 
 // DB layer for the WS3 async job lifecycle (schema in scripts/migrate.ts: vk_jobs + vk_seen_jti).
 // Every state change is an ATOMIC conditional UPDATE guarded on the allowed prior state — the same
@@ -24,6 +25,19 @@ export interface JobRow {
   outcome: Outcome | null;
   settleTxHash: string | null;
   lastError: string | null;
+  // WS11 — dispute/escalation fields. `disputable` opts the job into the challenge-window path;
+  // challengeWindowMs is the window length (null ⇒ engine default); challengeDeadline is when it closes
+  // (set on PROPOSED). disputedBy/disputeReason record the contest; arbiter* record the mocked ruling.
+  // Optional on the type (nullable/defaulted at the DB layer): toRow always populates them for a real
+  // store row, and the engine treats an absent `disputable` as false — the safe non-disputable default.
+  disputable?: boolean;
+  challengeWindowMs?: number | null;
+  challengeDeadline?: Date | null;
+  disputedBy?: DisputeParty | null;
+  disputeReason?: string | null;
+  arbiterOutcome?: ArbiterOutcome | null;
+  arbiterUpheld?: boolean | null;
+  arbiterRationale?: string | null;
   // Seller-facing brief (Option C). Resolved in-memory at dispatch (dispatch is one-shot) and attached
   // to the job the transport dispatches — NOT a DB column, so it is absent on rows read back from the
   // store. Transports include it in the envelope when present.
@@ -35,6 +49,9 @@ interface JobDbRow {
   seller_protocol: string; callback_token: string; result_ref: string | null;
   deadline: string | Date; dispatch_attempts: number; artifact: Artifact | null;
   outcome: string | null; settle_tx_hash: string | null; last_error: string | null;
+  disputable: boolean | null; challenge_window_ms: number | null; challenge_deadline: string | Date | null;
+  disputed_by: string | null; dispute_reason: string | null;
+  arbiter_outcome: string | null; arbiter_upheld: boolean | null; arbiter_rationale: string | null;
 }
 
 function toRow(r: JobDbRow): JobRow {
@@ -52,6 +69,14 @@ function toRow(r: JobDbRow): JobRow {
     outcome: r.outcome as Outcome | null,
     settleTxHash: r.settle_tx_hash,
     lastError: r.last_error,
+    disputable: r.disputable ?? false,
+    challengeWindowMs: r.challenge_window_ms ?? null,
+    challengeDeadline: r.challenge_deadline ? new Date(r.challenge_deadline) : null,
+    disputedBy: (r.disputed_by as DisputeParty | null) ?? null,
+    disputeReason: r.dispute_reason ?? null,
+    arbiterOutcome: (r.arbiter_outcome as ArbiterOutcome | null) ?? null,
+    arbiterUpheld: r.arbiter_upheld ?? null,
+    arbiterRationale: r.arbiter_rationale ?? null,
   };
 }
 
@@ -63,11 +88,15 @@ export async function createJob(input: {
   callbackToken: string;
   resultRef: string | null;
   deadline: Date;
+  disputable?: boolean;
+  challengeWindowMs?: number | null;
 }): Promise<void> {
   await sql`
-    INSERT INTO vk_jobs (job_id, work_id, state, seller_url, seller_protocol, callback_token, result_ref, deadline)
+    INSERT INTO vk_jobs (job_id, work_id, state, seller_url, seller_protocol, callback_token, result_ref,
+                         deadline, disputable, challenge_window_ms)
     VALUES (${input.jobId}, ${input.workId}, 'FUNDED', ${input.sellerUrl}, ${input.sellerProtocol},
-            ${input.callbackToken}, ${input.resultRef}, ${input.deadline.toISOString()})
+            ${input.callbackToken}, ${input.resultRef}, ${input.deadline.toISOString()},
+            ${input.disputable ?? false}, ${input.challengeWindowMs ?? null})
     ON CONFLICT (job_id) DO NOTHING`;
 }
 
@@ -144,6 +173,58 @@ export async function markExpired(jobId: string, settleTxHash: string): Promise<
   const r = await sql`
     UPDATE vk_jobs SET state = 'EXPIRED', outcome = 'refund', settle_tx_hash = ${settleTxHash}, updated_at = now()
     WHERE job_id = ${jobId} AND state NOT IN ('SETTLED', 'ABSTAINED', 'EXPIRED')`;
+  return r.rowCount === 1;
+}
+
+// ── WS11 dispute/escalation transitions (all atomic, single-shot: rowCount===1 ⇔ this caller won) ──
+
+// Hold settlement: a disputable job's verdict has been computed → PROPOSED, opening the challenge
+// window (challenge_deadline). Funds stay FUNDED on-chain. Only a VERIFYING job can be held.
+export async function markProposed(jobId: string, challengeDeadline: Date): Promise<boolean> {
+  const r = await sql`
+    UPDATE vk_jobs SET state = 'PROPOSED', challenge_deadline = ${challengeDeadline.toISOString()}, updated_at = now()
+    WHERE job_id = ${jobId} AND state = 'VERIFYING'`;
+  return r.rowCount === 1;
+}
+
+// Undisputed finalize: the challenge window closed with no dispute → settle the proposed verdict, landing
+// SETTLED (definitive) or ABSTAINED (abstain), same terminal mapping as the direct path. Only from PROPOSED.
+export async function finalizeProposed(jobId: string, outcome: Outcome, settleTxHash: string): Promise<boolean> {
+  const target = outcomeToState(outcome);
+  const r = await sql`
+    UPDATE vk_jobs SET state = ${target}, outcome = ${outcome}, settle_tx_hash = ${settleTxHash}, updated_at = now()
+    WHERE job_id = ${jobId} AND state = 'PROPOSED'`;
+  return r.rowCount === 1;
+}
+
+// Open a dispute: a party contests the proposed verdict in-window → DISPUTED. Single-shot on PROPOSED, so
+// only the FIRST dispute wins (a second contest updates 0 rows → idempotent no-op).
+export async function openDispute(jobId: string, by: DisputeParty, reason: string): Promise<boolean> {
+  const r = await sql`
+    UPDATE vk_jobs SET state = 'DISPUTED', disputed_by = ${by}, dispute_reason = ${reason}, updated_at = now()
+    WHERE job_id = ${jobId} AND state = 'PROPOSED'`;
+  return r.rowCount === 1;
+}
+
+// Hand the dispute to the arbiter → ESCALATED. Only from DISPUTED.
+export async function markEscalated(jobId: string): Promise<boolean> {
+  const r = await sql`UPDATE vk_jobs SET state = 'ESCALATED', updated_at = now() WHERE job_id = ${jobId} AND state = 'DISPUTED'`;
+  return r.rowCount === 1;
+}
+
+// Terminal resolve: the arbiter's ruling settled on-chain → RESOLVED. Records the money outcome plus the
+// arbiter's before/after (upheld) and rationale for an honest audit trail. Only from ESCALATED.
+export async function markResolved(
+  jobId: string,
+  outcome: ArbiterOutcome,
+  upheld: boolean,
+  rationale: string,
+  settleTxHash: string,
+): Promise<boolean> {
+  const r = await sql`
+    UPDATE vk_jobs SET state = 'RESOLVED', outcome = ${outcome}, arbiter_outcome = ${outcome},
+      arbiter_upheld = ${upheld}, arbiter_rationale = ${rationale}, settle_tx_hash = ${settleTxHash}, updated_at = now()
+    WHERE job_id = ${jobId} AND state = 'ESCALATED'`;
   return r.rowCount === 1;
 }
 
