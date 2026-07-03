@@ -46,6 +46,20 @@ function body(sig: `0x${string}`, routes: RawRoutes, over: Partial<Record<string
 }
 const opts = { escrow: ESCROW, maxAmount: MAX, nowSec: NOW };
 
+// Lockstep tripwire — the SAME fixed-vector nonce constant is asserted here, in the Foundry test
+// (testFundForNonceVectorIsCanonical), and in web (prove-wallet-sign.ts). If the worker's deriveNonce
+// ever drifts from the contract's keccak256(abi.encode(...)), this constant stops matching.
+describe('deriveNonce lockstep', () => {
+  it('matches the canonical fixed-vector nonce (== contract + web)', () => {
+    const n = deriveNonce({
+      workId: `0x${'11'.repeat(32)}`, worker: `0x${'22'.repeat(20)}`,
+      amount: 60000n, fee: 10000n, ttl: 3600n, payer: `0x${'33'.repeat(20)}`,
+      routes: { workerDomain: 0, workerRecipient: `0x${'00'.repeat(32)}`, payerDomain: 0, payerRecipient: `0x${'00'.repeat(32)}` },
+    });
+    expect(n).toBe('0x04e7254274bfc99a4bbe564c2c681993848fb46cceb8ac4a740cc80f67599366');
+  });
+});
+
 describe('verifyRelayerAuth', () => {
   it('accepts a correctly-signed authorization (recovers to payer)', async () => {
     const sig = await sign(LOCAL_ROUTES);

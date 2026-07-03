@@ -64,6 +64,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
   const [fundTx, setFundTx] = useState<string | null>(null);
   const [status, setStatus] = useState('idle');
   const [busy, setBusy] = useState(false);
+  const [flowActive, setFlowActive] = useState(false); // true for the WHOLE flow (funding + SSE wait)
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +82,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
     setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null); setError(null); setStatus('idle');
   }
   const push = (s: Step) => setSteps((cur) => [...cur, s]);
-  function stop() { runningRef.current = false; setBusy(false); esRef.current?.close(); if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; } }
+  function stop() { runningRef.current = false; setBusy(false); setFlowActive(false); esRef.current?.close(); if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; } }
 
   async function faucet() {
     if (!address) return;
@@ -125,11 +126,12 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
   async function hire() {
     if (!address || !selected || !config || runningRef.current) return;
     if (wrongNetwork) { setError('Switch to Arc testnet first.'); return; }
-    if (balance !== null && balance < TOTAL_USDC) { setError(`You need ${TOTAL_USDC} USDC. Use the faucet.`); return; }
+    if (balance === null) { setError('Still reading your balance — one moment, then try again.'); refetchBalance(); return; }
+    if (balance < TOTAL_USDC) { setError(`You need ${TOTAL_USDC} USDC. Use “Get test USDC”.`); return; }
     const built = config.buildAcceptance(inputs);
     if (!built.ok) { setError(built.error); return; }
 
-    runningRef.current = true; setBusy(true); setError(null); setFaucetMsg(null);
+    runningRef.current = true; setBusy(true); setFlowActive(true); setError(null); setFaucetMsg(null);
     setSteps([]); setVerdict(null); setOutcome(undefined); setSettleTx(null); setFundTx(null);
     const workId = randomWorkId();
     const worker = selected.wallet;
@@ -152,7 +154,14 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
       // 3. Sign the EIP-3009 authorization in-browser (routes folded into the nonce). No gas, no tx.
       setStatus('waiting for your signature'); push({ key: 'sign', text: 'Sign the payment authorization in your wallet (no gas)…', tone: 'neutral' });
       const auth = buildAuthorization({ escrow, payer: address, workId, worker, totalUsdc: TOTAL_USDC, feeUsdc: FEE_USDC });
-      const signature = await signTypedDataAsync(auth.typedData as Parameters<typeof signTypedDataAsync>[0]);
+      // Pass the pre-built EIP-712 payload field-by-field so wagmi infers the shape (no blanket cast).
+      // The exact serialization this produces is proven to recover + fund via prove-wallet-sign.ts.
+      const signature = await signTypedDataAsync({
+        domain: auth.typedData.domain,
+        types: auth.typedData.types,
+        primaryType: auth.typedData.primaryType,
+        message: auth.typedData.message,
+      });
 
       // 4. The relayer submits it — the human pays ZERO gas.
       setStatus('funding escrow (gasless)'); push({ key: 'fund', text: 'Relayer funding your escrow on Arc (you pay no gas)…', tone: 'neutral' });
@@ -238,7 +247,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
         ) : (
           <div className="hc-grid">
             {sellers.map((s) => (
-              <button key={s.sellerId} type="button" className="hc-card" data-active={selected?.sellerId === s.sellerId} onClick={() => pick(s)} disabled={busy}>
+              <button key={s.sellerId} type="button" className="hc-card" data-active={selected?.sellerId === s.sellerId} onClick={() => pick(s)} disabled={flowActive}>
                 <span className="hc-name">{CAPABILITY_NAME[s.capability] ?? s.capability}</span>
                 <span className="hc-cap mono">{s.capability}</span>
                 <span className="hc-spec">{s.acceptanceTemplate.spec}</span>
@@ -259,7 +268,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
               <label key={f.key} className="try-field">
                 <span className="tf-label">{f.label}</span>
                 <span className="tf-hint">{f.hint}</span>
-                <textarea className={f.mono ? 'mono' : ''} rows={f.rows} spellCheck={false} disabled={busy}
+                <textarea className={f.mono ? 'mono' : ''} rows={f.rows} spellCheck={false} disabled={flowActive}
                   value={inputs[f.key] ?? ''} onChange={(e) => setInputs((cur) => ({ ...cur, [f.key]: e.target.value }))} />
               </label>
             ))}
@@ -269,7 +278,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
           </div>
           {error && <p className="hf-error">{error}</p>}
           <div className="cta-row">
-            <button type="button" className="btn btn-primary" onClick={hire} disabled={busy || !isConnected || wrongNetwork}>
+            <button type="button" className="btn btn-primary" onClick={hire} disabled={flowActive || !isConnected || wrongNetwork || balance === null || balance < TOTAL_USDC}>
               {busy ? status : `Hire · escrow ${TOTAL_USDC} USDC →`}
             </button>
             {!busy && <button type="button" className="btn btn-ghost" onClick={() => setInputs({ ...config.example })}>Reset example</button>}
