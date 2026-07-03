@@ -65,7 +65,9 @@ export const engine = makeEngine({
     if (!run.txHash) return;
     const settlement = settlementFromRun(task, run.verdict, run.outcome as Outcome, run.txHash, run.bps);
     const r = await attestSettlement(task, run.verdict, settlement);
-    const detail = r.status === 'attested' ? `resp=${r.responseTxHash}` : r.reason;
+    const detail = r.status === 'attested'
+      ? `req=${r.requestHash} resp=${r.responseTxHash}`
+      : `${r.requestHash ? `req=${r.requestHash} ` : ''}${r.reason}`;
     console.log(`[erc8004] ${task.workId} attest: ${r.status} (${detail})`);
   },
   now: () => Date.now(),

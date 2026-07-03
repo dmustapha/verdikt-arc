@@ -59,9 +59,13 @@ export async function attestSettlement(
     // Serve the evidence first so the responseURI resolves the instant the tx lands.
     putEvidence(att);
 
-    // Idempotency: if this settlement was already attested on-chain, don't double-write.
+    // Idempotency: skip only if a RESPONSE already exists. An open-but-unanswered request also has
+    // lastUpdate > 0 (and a set validatorAddress) — the tell for "already responded" is a non-empty
+    // tag / non-zero responseHash. Keying on lastUpdate alone would wrongly skip re-posting a response
+    // after a request opened but its response failed (exactly the load-balanced-RPC failure mode).
+    const ZERO_HASH = `0x${'00'.repeat(32)}`;
     const existing = await readValidationStatus(att.requestHash);
-    if (existing && existing.lastUpdate > 0n) {
+    if (existing && (existing.tag !== '' || existing.responseHash.toLowerCase() !== ZERO_HASH)) {
       return { status: 'skipped', reason: 'already attested on-chain', requestHash: att.requestHash };
     }
 
