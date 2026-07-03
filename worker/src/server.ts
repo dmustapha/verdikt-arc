@@ -9,6 +9,8 @@ import { jobsRouter } from './routes/jobs.js';
 import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
 import { evidenceRouter } from './routes/evidence.js';
+import { enableEvidencePersistence } from './lib/evidence-store.js';
+import { enableAttestation } from './lib/attestor.js';
 import { engine, startWorkerKeeper } from './lib/engine-instance.js';
 
 const app = express();
@@ -52,6 +54,13 @@ app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Re
   console.error('[verdikt-worker] unhandled error:', err);
   res.status(500).json({ error: 'internal error' });
 });
+
+// Durable ERC-8004 evidence: persist bundles to Postgres so the on-chain responseURIs keep resolving
+// across worker restarts. Opt-in (only when a DB is configured) — unit tests stay Map-only.
+if (process.env.POSTGRES_URL) enableEvidencePersistence();
+// Turn on post-settle ERC-8004 attestation only in the running server (and only when configured), so
+// tests exercising the real runVerdict never fire live Base Sepolia writes.
+if (process.env.ERC8004_AGENT_ID) enableAttestation();
 
 const port = parseInt(process.env.PORT ?? '8080', 10);
 app.listen(port, () => console.log(`[verdikt-worker] listening on :${port}`));

@@ -10,8 +10,6 @@ import { refundExpiredOnChain } from '../settlement/expire.js';
 import { makeEngine } from './job-engine.js';
 import type { JobStore } from './job-engine.js';
 import { startKeeper } from './keeper.js';
-import type { Outcome } from '../types.js';
-import { attestSettlement, settlementFromRun } from './attestor.js';
 
 // Production job engine, wired to the real store / generic seller adapter / verdict engine / on-chain
 // refund. A single shared instance so the jobs routes, the callback router, and the keeper all drive
@@ -58,18 +56,8 @@ export const engine = makeEngine({
   verify: runVerdict,
   getTask,
   refundExpiredOnChain,
-  // Post-settle ERC-8004 attestation (best-effort, env-gated — no-op unless ERC8004_AGENT_ID + an
-  // attestor key are configured). Reconstructs the Settlement from the run result and records the
-  // verdict as a validationResponse on the canonical Base Sepolia registry.
-  attest: async (task, run) => {
-    if (!run.txHash) return;
-    const settlement = settlementFromRun(task, run.verdict, run.outcome as Outcome, run.txHash, run.bps);
-    const r = await attestSettlement(task, run.verdict, settlement);
-    const detail = r.status === 'attested'
-      ? `req=${r.requestHash} resp=${r.responseTxHash}`
-      : `${r.requestHash ? `req=${r.requestHash} ` : ''}${r.reason}`;
-    console.log(`[erc8004] ${task.workId} attest: ${r.status} (${detail})`);
-  },
+  // NOTE: post-settle ERC-8004 attestation fires inside runVerdict (the single settle chokepoint),
+  // not here — so both the async job path and the sync /verdict route are covered by construction.
   now: () => Date.now(),
   dispatch: {
     maxAttempts: Number(process.env.DISPATCH_MAX_ATTEMPTS ?? 3),

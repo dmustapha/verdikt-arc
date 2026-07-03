@@ -37,11 +37,11 @@ function loadConfig(): AttestorConfig | null {
 }
 
 // Reconstruct the Settlement the attestation needs from the async engine's run result. (The engine
-// hands back verdict + outcome + txHash + bps; circleTxId isn't needed by the evidence bundle.)
-export function settlementFromRun(
-  task: Task, verdict: VerdictResult, outcome: Settlement['outcome'], txHash: string, bps?: number,
-): Settlement {
-  return { workId: task.workId, outcome, verdictCode: verdict.verdictCode, evidenceHash: verdict.evidenceHash, txHash, circleTxId: '', bps };
+// A RESPONSE already exists on-chain (vs. an open-but-unanswered request, which also has lastUpdate>0).
+// The tell is a non-empty tag / non-zero responseHash — NOT lastUpdate.
+const ZERO_HASH = `0x${'00'.repeat(32)}`;
+function hasResponse(s: Awaited<ReturnType<typeof readValidationStatus>>): boolean {
+  return !!s && (s.tag !== '' || s.responseHash.toLowerCase() !== ZERO_HASH);
 }
 
 // Attest a settled verdict. Guarantees: never throws; abstain is skipped (nothing was validated);
@@ -56,16 +56,13 @@ export async function attestSettlement(
     if (!settlement.txHash) return { status: 'skipped', reason: 'no settlement tx' };
 
     const att = buildAttestation({ verdict, settlement, task, validator: cfg.validator, baseUrl: cfg.baseUrl });
-    // Serve the evidence first so the responseURI resolves the instant the tx lands.
-    putEvidence(att);
+    // Serve+persist the evidence first so the responseURI resolves the instant the tx lands.
+    await putEvidence(att);
 
-    // Idempotency: skip only if a RESPONSE already exists. An open-but-unanswered request also has
-    // lastUpdate > 0 (and a set validatorAddress) — the tell for "already responded" is a non-empty
-    // tag / non-zero responseHash. Keying on lastUpdate alone would wrongly skip re-posting a response
-    // after a request opened but its response failed (exactly the load-balanced-RPC failure mode).
-    const ZERO_HASH = `0x${'00'.repeat(32)}`;
-    const existing = await readValidationStatus(att.requestHash);
-    if (existing && (existing.tag !== '' || existing.responseHash.toLowerCase() !== ZERO_HASH)) {
+    // Fast idempotency skip for an obvious re-run. A stale-negative read here (load-balanced RPC) is
+    // harmless: we fall through, open the request (idempotent "exists"), and re-check below where the
+    // read is reliable — so we never double-post a response.
+    if (hasResponse(await readValidationStatus(att.requestHash))) {
       return { status: 'skipped', reason: 'already attested on-chain', requestHash: att.requestHash };
     }
 
@@ -73,6 +70,11 @@ export async function attestSettlement(
       attestorKey: cfg.attestorKey, agentId: cfg.agentId, validator: cfg.validator,
       requestHash: att.requestHash, requestURI: att.requestURI,
     });
+    // Re-check AFTER the request is confirmed visible (openValidationRequest waits for propagation):
+    // this read is reliable, so it reliably catches a re-run whose earlier fast-skip read was stale.
+    if (hasResponse(await readValidationStatus(att.requestHash))) {
+      return { status: 'skipped', reason: 'already attested on-chain (recheck)', requestHash: att.requestHash };
+    }
     const responseTxHash = await postValidationResponse({
       attestorKey: cfg.attestorKey, requestHash: att.requestHash, response: att.response,
       responseURI: att.responseURI, responseHash: att.responseHash, tag: att.tag,
@@ -81,4 +83,22 @@ export async function attestSettlement(
   } catch (e) {
     return { status: 'error', reason: String((e as Error)?.message ?? e) };
   }
+}
+
+// Attestation is OFF by default and turned on only at server boot via enableAttestation(). This keeps
+// it dormant in tests and library imports — otherwise any test exercising the real runVerdict would
+// fire live Base Sepolia writes (the .env carries ERC8004_AGENT_ID). Mirrors evidence persistence.
+let attestationEnabled = false;
+export function enableAttestation(): void { attestationEnabled = true; }
+
+// Fire-and-forget wrapper for the SINGLE settle chokepoint (orchestrator.runVerdict). Covers both the
+// sync /verdict route and the async job path with no latency (callers `void` it). Never throws —
+// attestSettlement swallows all failures — so it is safe to leave unawaited. No-op until enabled.
+export async function attestAfterSettle(task: Task, verdict: VerdictResult, settlement: Settlement): Promise<void> {
+  if (!attestationEnabled) return;
+  const r = await attestSettlement(task, verdict, settlement);
+  const detail = r.status === 'attested'
+    ? `req=${r.requestHash} resp=${r.responseTxHash}`
+    : `${r.requestHash ? `req=${r.requestHash} ` : ''}${r.reason}`;
+  console.log(`[erc8004] ${settlement.workId} attest: ${r.status} (${detail})`);
 }

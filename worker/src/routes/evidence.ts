@@ -8,7 +8,7 @@ import { getEvidence, type StoredEvidence } from '../lib/evidence-store.js';
 const REQUEST_HASH = /^0x[0-9a-fA-F]{64}$/;
 
 export interface EvidenceDeps {
-  get(requestHash: string): StoredEvidence | undefined;
+  get(requestHash: string): Promise<StoredEvidence | undefined>;
 }
 
 export type EvidenceResult =
@@ -16,20 +16,20 @@ export type EvidenceResult =
   | { status: 400 | 404; body: { error: string } };
 
 // `id` may arrive as "<requestHash>" or "<requestHash>.json" (the responseURI uses the .json form).
-export function handleGetEvidence(deps: EvidenceDeps, id: string): EvidenceResult {
+export async function handleGetEvidence(deps: EvidenceDeps, id: string): Promise<EvidenceResult> {
   const requestHash = id.replace(/\.json$/i, '');
   if (!REQUEST_HASH.test(requestHash)) return { status: 400, body: { error: 'invalid requestHash' } };
-  const found = deps.get(requestHash);
+  const found = await deps.get(requestHash);
   if (!found) return { status: 404, body: { error: 'evidence not found' } };
   return { status: 200, json: found.json };
 }
 
 export const evidenceRouter = Router();
 
-evidenceRouter.get('/evidence/:id', (req, res) => {
+evidenceRouter.get('/evidence/:id', async (req, res) => {
   // Public attestation doc: allow any origin to fetch and verify it.
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const r = handleGetEvidence({ get: getEvidence }, req.params.id);
+  const r = await handleGetEvidence({ get: getEvidence }, req.params.id);
   if (r.status === 200) {
     res.status(200).type('application/json').send(r.json);
     return;

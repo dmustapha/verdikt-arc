@@ -14,30 +14,30 @@ const T: Task = { workId: WORK_ID, type: 'answer', acceptance: {} as any, payer:
 beforeEach(() => _clearEvidence());
 
 describe('handleGetEvidence', () => {
-  it('serves a stored bundle whose bytes hash to the on-chain responseHash', () => {
+  it('serves a stored bundle whose bytes hash to the on-chain responseHash', async () => {
     const att = buildAttestation({ verdict: V, settlement: S, task: T, validator: '0xD089Dfc911ea0A5cA7A54ff912ab73B5531D02D7', baseUrl: 'https://x' });
-    putEvidence(att);
-    const r = handleGetEvidence({ get: getEvidence }, att.requestHash);
+    await putEvidence(att);
+    const r = await handleGetEvidence({ get: getEvidence }, att.requestHash);
     expect(r.status).toBe(200);
     if (r.status !== 200) throw new Error('unreachable');
     expect(keccak256(toBytes(r.json))).toBe(att.responseHash);
     expect(r.json).toContain(SETTLE_TX); // Gate D1: the Arc settlement tx is in the served evidence
   });
 
-  it('accepts the ".json" suffix form the responseURI uses', () => {
+  it('accepts the ".json" suffix form the responseURI uses', async () => {
     const att = buildAttestation({ verdict: V, settlement: S, task: T, validator: '0xD089Dfc911ea0A5cA7A54ff912ab73B5531D02D7', baseUrl: 'https://x' });
-    putEvidence(att);
-    const r = handleGetEvidence({ get: getEvidence }, `${att.requestHash}.json`);
+    await putEvidence(att);
+    const r = await handleGetEvidence({ get: getEvidence }, `${att.requestHash}.json`);
     expect(r.status).toBe(200);
   });
 
-  it('404 for an unknown requestHash', () => {
-    const r = handleGetEvidence({ get: getEvidence }, '0x' + '00'.repeat(32));
+  it('404 for an unknown requestHash', async () => {
+    const r = await handleGetEvidence({ get: getEvidence }, '0x' + '00'.repeat(32));
     expect(r.status).toBe(404);
   });
 
-  it('400 for a malformed id', () => {
-    expect(handleGetEvidence({ get: getEvidence }, 'not-a-hash').status).toBe(400);
-    expect(handleGetEvidence({ get: getEvidence }, '0x1234').status).toBe(400);
+  it('400 for a malformed id', async () => {
+    expect((await handleGetEvidence({ get: getEvidence }, 'not-a-hash')).status).toBe(400);
+    expect((await handleGetEvidence({ get: getEvidence }, '0x1234')).status).toBe(400);
   });
 });

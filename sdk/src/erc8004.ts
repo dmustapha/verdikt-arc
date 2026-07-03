@@ -39,7 +39,10 @@ export interface ValidationStatus {
   responseHash: `0x${string}`; tag: string; lastUpdate: bigint;
 }
 export interface AgentIdentity {
-  agentId: bigint; owner: `0x${string}`; tokenURI: string; agentWallet: `0x${string}`;
+  agentId: bigint; owner: `0x${string}`; tokenURI: string;
+  // ERC-8004 agent-wallet resolver value: may default to the owner, or be a distinctly-bound wallet
+  // (setAgentWallet); zero if the read reverts. Do NOT assume it is an explicitly-bound wallet.
+  agentWallet: `0x${string}`;
 }
 
 const reader = (rpcUrl?: string): ReadClient =>
