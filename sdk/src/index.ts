@@ -8,6 +8,11 @@ export {
 export { criteriaHash, artifactMessage, offerMessage, verifyOffer } from './crypto.js';
 export { readEscrow, ARC_CHAIN_ID, type EscrowState, type RawPayoutRoutes } from './escrow.js';
 export {
+  readValidationStatus, readAgentIdentity,
+  BASE_SEPOLIA_CHAIN_ID, ERC8004_IDENTITY_REGISTRY, ERC8004_REPUTATION_REGISTRY, ERC8004_VALIDATION_REGISTRY,
+  type ValidationStatus, type AgentIdentity,
+} from './erc8004.js';
+export {
   depositForBurnWithHook, pollAttestation, mintAndFund, relayOutbound, fundCrossChainEscrow,
   addressToBytes32, encodeHookData, chainInfo,
   CHAINS, type ChainKey, type ChainInfo, type CrossChainConfig, type PayoutRoute, type PayoutRoutes,
