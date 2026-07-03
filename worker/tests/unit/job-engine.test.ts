@@ -19,6 +19,9 @@ function memStore(): JobStore & { rows: Map<string, JobRow> } {
         jobId: i.jobId, workId: i.workId, state: 'FUNDED', sellerUrl: i.sellerUrl, sellerProtocol: i.sellerProtocol,
         callbackToken: i.callbackToken, resultRef: i.resultRef, deadline: i.deadline, dispatchAttempts: 0,
         artifact: null, outcome: null, settleTxHash: null, lastError: null,
+        disputable: i.disputable ?? false, challengeWindowMs: i.challengeWindowMs ?? null,
+        challengeDeadline: null, disputedBy: null, disputeReason: null,
+        arbiterOutcome: null, arbiterUpheld: null, arbiterRationale: null,
       });
     },
     async getJob(id) { return rows.get(id) ?? null; },
@@ -31,6 +34,12 @@ function memStore(): JobStore & { rows: Map<string, JobRow> } {
     async recordDispatchAttempt(id, err) { const r = rows.get(id); if (r) set(id, { dispatchAttempts: r.dispatchAttempts + 1, lastError: err ?? r.lastError }); },
     async recordJobError(id, err) { set(id, { lastError: err }); },
     async listByState(states) { return [...rows.values()].filter((r) => states.includes(r.state)); },
+    // WS11 dispute transitions — same single-shot state guards as the real store.
+    async markProposed(id, dl) { const r = rows.get(id); if (r?.state !== 'VERIFYING') return false; set(id, { state: 'PROPOSED', challengeDeadline: dl }); return true; },
+    async finalizeProposed(id, outcome, tx) { const r = rows.get(id); if (r?.state !== 'PROPOSED') return false; set(id, { state: outcome === 'abstain' ? 'ABSTAINED' : 'SETTLED', outcome, settleTxHash: tx }); return true; },
+    async openDispute(id, by, reason) { const r = rows.get(id); if (r?.state !== 'PROPOSED') return false; set(id, { state: 'DISPUTED', disputedBy: by, disputeReason: reason }); return true; },
+    async markEscalated(id) { const r = rows.get(id); if (r?.state !== 'DISPUTED') return false; set(id, { state: 'ESCALATED' }); return true; },
+    async markResolved(id, outcome, upheld, rationale, tx) { const r = rows.get(id); if (r?.state !== 'ESCALATED') return false; set(id, { state: 'RESOLVED', outcome, arbiterOutcome: outcome, arbiterUpheld: upheld, arbiterRationale: rationale, settleTxHash: tx }); return true; },
   };
 }
 
@@ -59,6 +68,9 @@ function mkEngine(over: Partial<Parameters<typeof makeEngine>[0]> = {}) {
   const engine = makeEngine({
     store, transport, verify, refundExpiredOnChain, getTask, now, emit,
     dispatch: { maxAttempts: 3, baseDelayMs: 1, sleep: vi.fn().mockResolvedValue(undefined) },
+    // WS11 dispute deps (only exercised by the dispute-path tests; undefined here for the happy path).
+    propose: over.propose, settleGiven: over.settleGiven, getProposedVerdict: over.getProposedVerdict,
+    getEvidence: over.getEvidence, arbitrate: over.arbitrate, challengeWindowMs: over.challengeWindowMs,
   });
   return { engine, store, transport, verify, refundExpiredOnChain, getTask, emit };
 }
@@ -212,6 +224,135 @@ describe('job-engine — job_state SSE emit (WS8 dashboard)', () => {
     expect(job!.state).toBe('AWAITING_DELIVERY'); // dispatch completed despite emit throwing
     await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
     expect(ctx.store.rows.get('j1')!.state).toBe('SETTLED'); // settlement completed too
+  });
+});
+
+describe('job-engine — WS11 dispute/escalation path', () => {
+  const bundle = { route: 'code' as const, items: [{ id: 'test:t0', kind: 'test' as const, label: 't', status: 'pass' as const, detail: '' }] };
+  const arbiterVerdict = { ...verdict, verdict: 'fail' as const, verdictCode: 1, rationale: '[MOCK ARBITER] overturned', evidenceHash: `0x${'b'.repeat(64)}` } as VerdictResult;
+
+  // A fully-wired disputable engine. propose holds the verdict; arbitrate returns a controllable ruling;
+  // settleGiven stands in for the on-chain settle (the arbiter unit test proves the real ruling logic).
+  function disputableCtx(over: Parameters<typeof mkEngine>[0] = {}) {
+    // Overrides win, and the RETURNED deps are the exact spies the engine uses (so assertions on
+    // ctx.settleGiven etc. observe the real calls).
+    const propose = over.propose ?? vi.fn().mockResolvedValue({ verdict, bundle });
+    const settleGiven = over.settleGiven ?? vi.fn().mockResolvedValue(verdictResult('refund', '0xarb'));
+    const getProposedVerdict = over.getProposedVerdict ?? vi.fn().mockResolvedValue(verdict);
+    const getEvidence = over.getEvidence ?? vi.fn().mockResolvedValue(bundle);
+    const arbitrate = over.arbitrate ?? vi.fn().mockReturnValue({
+      arbiter: 'mock', outcome: 'refund', upheld: false, proposedOutcome: 'release',
+      rationale: '[MOCK ARBITER] buyer dispute upheld', verdict: arbiterVerdict,
+    });
+    const base = mkEngine({ ...over, propose, settleGiven, getProposedVerdict, getEvidence, arbitrate, challengeWindowMs: over.challengeWindowMs ?? 60_000 });
+    return { ...base, propose, settleGiven, getProposedVerdict, getEvidence, arbitrate };
+  }
+
+  const disputable = { ...createInput, disputable: true };
+
+  async function proposedJob(over: Parameters<typeof mkEngine>[0] = {}) {
+    const ctx = disputableCtx(over);
+    await ctx.engine.startJob(disputable);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    return ctx;
+  }
+
+  it('HOLDS a disputable job in PROPOSED (computes the verdict, does NOT settle)', async () => {
+    const ctx = await proposedJob();
+    const row = ctx.store.rows.get('j1')!;
+    expect(ctx.propose).toHaveBeenCalledWith(task, artifact);
+    expect(ctx.verify).not.toHaveBeenCalled();       // the settling verify path is bypassed
+    expect(row.state).toBe('PROPOSED');
+    expect(row.settleTxHash).toBeNull();              // no money moved
+    expect(row.challengeDeadline).toBeInstanceOf(Date);
+    expect(emittedStates(ctx.emit)).toContain('PROPOSED');
+  });
+
+  it('an UNWIRED engine never strands a disputable job — it falls through to a normal settle', async () => {
+    // No dispute deps provided: the disputable flag cannot be honored, so the job must still settle.
+    const ctx = mkEngine();
+    await ctx.engine.startJob(disputable);
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    expect(ctx.store.rows.get('j1')!.state).toBe('SETTLED');
+  });
+
+  it('a dispute in-window → DISPUTED → ESCALATED → RESOLVED with the arbiter outcome', async () => {
+    const ctx = await proposedJob();
+    ctx.emit.mockClear();
+    const r = await ctx.engine.disputeJob('j1', 'payer', 'the code does not really pass');
+    expect(r.resolved).toBe(true);
+    expect(r.outcome).toBe('refund');
+    expect(r.upheld).toBe(false);
+    expect(ctx.arbitrate).toHaveBeenCalledOnce();
+    expect(ctx.settleGiven).toHaveBeenCalledWith(task, arbiterVerdict); // the ARBITER verdict is settled
+    const row = ctx.store.rows.get('j1')!;
+    expect(row.state).toBe('RESOLVED');
+    expect(row.outcome).toBe('refund');
+    expect(row.arbiterUpheld).toBe(false);
+    expect(row.disputedBy).toBe('payer');
+    expect(emittedStates(ctx.emit)).toEqual(['DISPUTED', 'ESCALATED', 'RESOLVED']);
+  });
+
+  it('refuses to dispute a job that is not PROPOSED', async () => {
+    const ctx = disputableCtx();
+    await ctx.engine.startJob(disputable); // still FUNDED/AWAITING, never delivered
+    const r = await ctx.engine.disputeJob('j1', 'worker', 'unfair');
+    expect(r.resolved).toBe(false);
+    expect(r.reason).toMatch(/not open to dispute/i);
+    expect(ctx.arbitrate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a dispute after the challenge window has closed', async () => {
+    let t = 1_000_000;
+    const ctx = await proposedJob({ now: () => t, challengeWindowMs: 1000 });
+    t += 5000; // advance past the window
+    const r = await ctx.engine.disputeJob('j1', 'payer', 'too late');
+    expect(r.resolved).toBe(false);
+    expect(r.reason).toMatch(/window has closed/i);
+    expect(ctx.store.rows.get('j1')!.state).toBe('PROPOSED'); // untouched
+  });
+
+  it('a second dispute loses the single-shot race (idempotent)', async () => {
+    const ctx = await proposedJob();
+    await ctx.engine.disputeJob('j1', 'payer', 'first'); // resolves → RESOLVED
+    const r2 = await ctx.engine.disputeJob('j1', 'worker', 'second');
+    expect(r2.resolved).toBe(false); // job is already RESOLVED, not PROPOSED
+    expect(ctx.arbitrate).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the job ESCALATED (non-terminal) when the arbiter settlement does not confirm', async () => {
+    const settleGiven = vi.fn().mockResolvedValue(verdictResult('refund', null)); // no txHash
+    const ctx = await proposedJob({ settleGiven });
+    const r = await ctx.engine.disputeJob('j1', 'payer', 'contested');
+    expect(r.resolved).toBe(false);
+    const row = ctx.store.rows.get('j1')!;
+    expect(isTerminal(row.state)).toBe(false);   // ESCALATED — the no-show refund is the backstop
+    expect(row.state).toBe('ESCALATED');
+    expect(row.lastError).toMatch(/confirm/i);
+  });
+
+  it('finalizeProposedJob refuses while the window is open', async () => {
+    let t = 1_000_000;
+    const ctx = await proposedJob({ now: () => t, challengeWindowMs: 60_000 });
+    const r = await ctx.engine.finalizeProposedJob('j1');
+    expect(r.finalized).toBe(false);
+    expect(r.reason).toMatch(/still open/i);
+    expect(ctx.settleGiven).not.toHaveBeenCalled();
+  });
+
+  it('finalizeProposedJob settles the held verdict once the window closes (undisputed → SETTLED)', async () => {
+    let t = 1_000_000;
+    const settleGiven = vi.fn().mockResolvedValue(verdictResult('release', '0xfin'));
+    const ctx = await proposedJob({ now: () => t, challengeWindowMs: 1000, settleGiven });
+    t += 5000; // window closed
+    ctx.emit.mockClear();
+    const r = await ctx.engine.finalizeProposedJob('j1');
+    expect(r.finalized).toBe(true);
+    expect(ctx.settleGiven).toHaveBeenCalledWith(task, verdict); // the HELD (proposed) verdict, not the arbiter's
+    const row = ctx.store.rows.get('j1')!;
+    expect(row.state).toBe('SETTLED');
+    expect(row.outcome).toBe('release');
+    expect(emittedStates(ctx.emit)).toEqual(['SETTLED']);
   });
 });
 
