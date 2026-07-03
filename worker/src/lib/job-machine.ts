@@ -10,6 +10,14 @@ export const JOB_STATES = [
   'AWAITING_DELIVERY',  // dispatch acked; waiting for the seller's artifact (poll or callback)
   'DELIVERED',          // authoritative artifact received
   'VERIFYING',          // running the verdict engine over the artifact
+  // WS11 dispute/escalation branch (opt-in via a `disputable` job). A disputable job holds
+  // settlement in PROPOSED — the verdict is computed but the escrow stays FUNDED on-chain — so a
+  // party can contest it inside a challenge window before any money moves. Non-disputable jobs never
+  // enter these states: they go VERIFYING → SETTLED/ABSTAINED exactly as before.
+  'PROPOSED',           // verdict computed, settlement HELD open for the challenge window (funds still FUNDED)
+  'DISPUTED',           // a party (payer/worker) contested the proposed verdict in-window
+  'ESCALATED',          // the dispute was handed to the (mocked) arbiter for a final ruling
+  'RESOLVED',           // terminal: the arbiter's ruling settled on-chain (release/refund/partial/abstain)
   'SETTLED',            // terminal: release / refund / partial split executed on-chain
   'ABSTAINED',          // terminal: could not verify → buyer refunded in full (bounty + fee)
   'EXPIRED',            // terminal: deadline passed / no-show → refundExpired paid the buyer
@@ -17,7 +25,7 @@ export const JOB_STATES = [
 
 export type JobState = (typeof JOB_STATES)[number];
 
-export const TERMINAL_STATES = ['SETTLED', 'ABSTAINED', 'EXPIRED'] as const satisfies readonly JobState[];
+export const TERMINAL_STATES = ['SETTLED', 'ABSTAINED', 'EXPIRED', 'RESOLVED'] as const satisfies readonly JobState[];
 
 export function isTerminal(state: JobState): boolean {
   return (TERMINAL_STATES as readonly JobState[]).includes(state);
@@ -31,7 +39,14 @@ const FORWARD: Record<JobState, JobState[]> = {
   DISPATCHED: ['AWAITING_DELIVERY', 'DELIVERED'], // a fast webhook may deliver before we mark awaiting
   AWAITING_DELIVERY: ['DELIVERED'],
   DELIVERED: ['VERIFYING'],
-  VERIFYING: ['SETTLED', 'ABSTAINED'],
+  // A verified job either settles straight away (the default) OR, when disputable, is held in PROPOSED.
+  VERIFYING: ['SETTLED', 'ABSTAINED', 'PROPOSED'],
+  // A held verdict finalizes to its normal terminal state if the window elapses undisputed, or branches
+  // into the dispute path if a party contests it.
+  PROPOSED: ['SETTLED', 'ABSTAINED', 'DISPUTED'],
+  DISPUTED: ['ESCALATED'],
+  ESCALATED: ['RESOLVED'],
+  RESOLVED: [],
   SETTLED: [],
   ABSTAINED: [],
   EXPIRED: [],
