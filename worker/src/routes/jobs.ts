@@ -3,6 +3,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { getTask, getVerdict, getEscrowMeta } from '../lib/db.js';
 import { createJob, getJob, recordJobError, listByPayer } from '../lib/job-store.js';
 import type { SellerProtocol } from '../lib/job-store.js';
+import type { DisputeParty } from '../lib/arbiter.js';
 import { readEscrowOnChain } from '../settlement/escrow-read.js';
 import { formatUnits } from 'viem';
 import { assertSafeUrl } from '../lib/ssrf.js';
@@ -30,6 +31,9 @@ const expireRateLimit = createRateLimiter({ perIp: Number(process.env.EXPIRE_PER
 // it a handful of times per job (mount + a couple of SSE-triggered refetches), so the cap is generous
 // but still bounds RPC amplification if a leaked jobId is hammered.
 const detailRateLimit = createRateLimiter({ perIp: Number(process.env.JOB_DETAIL_PER_IP ?? 200), ipWindowMs: 10 * 60 * 1000 });
+// /dispute triggers the arbiter + an on-chain settle — rate-limit per IP like /expire.
+const disputeRateLimit = createRateLimiter({ perIp: Number(process.env.DISPUTE_PER_IP ?? 30), ipWindowMs: 10 * 60 * 1000 });
+const DISPUTE_PARTIES: DisputeParty[] = ['payer', 'worker'];
 
 // POST /api/jobs — start the async lifecycle for an ALREADY-FUNDED escrow. The escrow must be funded
 // on-chain (the payer funds it separately via EIP-3009) and its task registered via /api/tasks; this
@@ -44,13 +48,19 @@ jobsRouter.post('/api/jobs', async (req, res) => {
   const limited = rateLimit(clientIp(req), Date.now());
   if (limited) { res.status(429).json({ error: limited }); return; }
 
-  const { workId, seller } = (req.body ?? {}) as {
+  const { workId, seller, disputable, challengeWindowMs } = (req.body ?? {}) as {
     workId?: `0x${string}`;
     seller?: { url?: string; protocol?: SellerProtocol; resultRef?: string };
+    disputable?: boolean;                 // WS11: opt this job into the challenge-window dispute path
+    challengeWindowMs?: number;           // WS11: how long the PROPOSED hold stays open (default via env)
   };
   if (!workId || !VALID_WORKID.test(workId)) { res.status(400).json({ error: 'valid bytes32 workId required' }); return; }
   if (!seller?.url || !seller.protocol || !PROTOCOLS.includes(seller.protocol)) {
     res.status(400).json({ error: `seller.url and seller.protocol (${PROTOCOLS.join('|')}) required` }); return;
+  }
+  if (disputable !== undefined && typeof disputable !== 'boolean') { res.status(400).json({ error: 'disputable must be a boolean' }); return; }
+  if (challengeWindowMs !== undefined && (!Number.isFinite(challengeWindowMs) || challengeWindowMs <= 0)) {
+    res.status(400).json({ error: 'challengeWindowMs must be a positive number of milliseconds' }); return;
   }
   try {
     assertSafeUrl(seller.url); // block private/loopback dispatch targets up front
@@ -76,7 +86,11 @@ jobsRouter.post('/api/jobs', async (req, res) => {
 
   const jobId = randomUUID();
   const callbackToken = randomBytes(24).toString('hex');
-  const input = { jobId, workId, sellerUrl: seller.url, sellerProtocol: seller.protocol, callbackToken, resultRef: seller.resultRef ?? null, deadline };
+  const input = {
+    jobId, workId, sellerUrl: seller.url, sellerProtocol: seller.protocol, callbackToken,
+    resultRef: seller.resultRef ?? null, deadline,
+    disputable: disputable ?? false, challengeWindowMs: challengeWindowMs ?? null,
+  };
 
   await createJob(input); // persist before ack so an immediate GET / callback resolves
   const base = process.env.WORKER_PUBLIC_URL ?? '';
@@ -89,6 +103,7 @@ jobsRouter.post('/api/jobs', async (req, res) => {
       a2a: `${base}/a2a/callback/${jobId}`,
     },
     deadline: deadline.toISOString(),
+    disputable: disputable ?? false, // WS11: if true, the verdict holds in PROPOSED for a challenge window
   });
 
   // Dispatch asynchronously (retries + backoff); startJob re-creates idempotently then dispatches.
@@ -168,7 +183,47 @@ jobsRouter.get('/api/jobs/:id', async (req, res) => {
     artifact: job.artifact,   // the seller's delivered deliverable (null pre-delivery)
     chain,                    // independent on-chain escrow truth (null on RPC failure)
     verdict,                  // recorded verdict for the result view (null pre-verdict)
+    // WS11 — dispute/escalation surface. `disputable` marks the challenge-window path; `dispute` is the
+    // recorded contest + the MOCKED arbiter's ruling (arbiterMock is always true — an honest boundary the
+    // UI must show: this is a demo stand-in, not real decentralized arbitration).
+    disputable: job.disputable ?? false,
+    challengeDeadline: job.challengeDeadline?.toISOString() ?? null,
+    dispute: (job.disputedBy || job.arbiterOutcome)
+      ? {
+          by: job.disputedBy,
+          reason: job.disputeReason,
+          arbiterOutcome: job.arbiterOutcome,
+          arbiterUpheld: job.arbiterUpheld,
+          arbiterRationale: job.arbiterRationale,
+          arbiterMock: true,
+        }
+      : null,
   });
+});
+
+// POST /api/jobs/:id/dispute — a party (payer|worker) contests a PROPOSED verdict during its challenge
+// window. The MOCKED arbiter resolves instantly and settles on-chain (release/refund/partial). Control-
+// plane gated for the demo; real party-signature auth + real decentralized arbitration (UMA/Kleros) are
+// roadmap. body: { by: 'payer'|'worker', reason: string }
+jobsRouter.post('/api/jobs/:id/dispute', async (req, res) => {
+  const secret = process.env.DEMO_SHARED_SECRET;
+  if (!secret) { res.status(503).json({ error: 'disputes disabled: DEMO_SHARED_SECRET not configured' }); return; }
+  if (req.header('X-Demo-Secret') !== secret) { res.status(401).json({ error: 'unauthorized' }); return; }
+
+  const limited = disputeRateLimit(clientIp(req), Date.now());
+  if (limited) { res.status(429).json({ error: limited }); return; }
+
+  const { by, reason } = (req.body ?? {}) as { by?: DisputeParty; reason?: string };
+  if (!by || !DISPUTE_PARTIES.includes(by)) { res.status(400).json({ error: `by must be one of ${DISPUTE_PARTIES.join('|')}` }); return; }
+  if (typeof reason !== 'string' || !reason.trim()) { res.status(400).json({ error: 'reason (non-empty string) required' }); return; }
+
+  try {
+    const r = await engine.disputeJob(req.params.id, by, reason.trim());
+    // Honest boundary flag on every response: the arbiter is a mock. 200 on resolution, 409 otherwise.
+    res.status(r.resolved ? 200 : 409).json({ ...r, arbiterMock: true });
+  } catch (e) {
+    res.status(502).json({ error: `dispute failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
 });
 
 // POST /api/jobs/:id/expire — manual keeper trigger. Only refunds the buyer, and only past the
