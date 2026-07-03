@@ -26,7 +26,7 @@ const ERC20 = [{ type: 'function', name: 'balanceOf', stateMutability: 'view', i
 const bal = async (a: `0x${string}`) => (await pub.readContract({ address: USDC, abi: ERC20, functionName: 'balanceOf', args: [a] })) as bigint;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-interface Scenario { skill: string; label: string; route: string; acceptance: Acceptance; expect: 'release' | 'not-release'; }
+interface Scenario { skill: string; label: string; route: string; acceptance: Acceptance; expect: 'release' | 'not-release'; sellerUrl?: string; protocol?: 'webhook' | 'a2a' | 'x402'; }
 
 async function runScenario(sc: Scenario): Promise<void> {
   const workId = keccak256(stringToHex(`deployed-${sc.label}-${RUN}`));
@@ -48,9 +48,11 @@ async function runScenario(sc: Scenario): Promise<void> {
 
   // 3. Start the job on the deployed worker (it dispatches to the deployed seller).
   const w0 = await bal(worker), p0 = await bal(payer);
+  const sellerUrl = sc.sellerUrl ?? `${SELLERS}/${sc.skill}/dispatch`;
+  const protocol = sc.protocol ?? 'webhook';
   const start = await fetch(`${WORKER}/api/jobs`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Demo-Secret': SECRET },
-    body: JSON.stringify({ workId, seller: { url: `${SELLERS}/${sc.skill}/dispatch`, protocol: 'webhook' } }),
+    body: JSON.stringify({ workId, seller: { url: sellerUrl, protocol } }),
   });
   if (start.status !== 202) throw new Error(`[${sc.label}] /api/jobs ${start.status}: ${await start.text()}`);
   const { jobId } = await start.json() as { jobId: string };
@@ -82,9 +84,14 @@ async function main() {
   console.log(`GATE C3 DEPLOYED loop — worker ${WORKER}  sellers ${SELLERS}  (${RUN})`);
 
   const AVG_TESTS = 'from solution import average\n\ndef test_mean():\n    assert average([2, 4, 6]) == 4\n\ndef test_empty():\n    assert average([]) == 0\n';
+  const A2A_URL = process.env.A2A_SELLER_URL ?? 'https://verdikt-a2a-research.fly.dev';
   const scenarios: Scenario[] = [
     // Research through the deployed stack (answer / grounding) — proves the full HTTP production loop.
     { skill: 'research', label: 'RESEARCH-RELEASE', route: 'answer', expect: 'release',
+      acceptance: { spec: 'What is the capital of France, and what river runs through it?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
+    // A2A DISPATCH path: the worker's a2aDriver resolves the card at the origin root, message/send's the
+    // task, and the keeper polls tasks/get — a standard A2A seller, dispatched live (not just over sockets).
+    { skill: 'research', label: 'A2A-RESEARCH-RELEASE', route: 'answer', expect: 'release', sellerUrl: A2A_URL, protocol: 'a2a',
       acceptance: { spec: 'What is the capital of France, and what river runs through it?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
     // Code through the deployed stack (code / DOCKER SANDBOX on Fly) — the route local Docker can't run.
     { skill: 'code', label: 'CODE-RELEASE', route: 'code', expect: 'release',
