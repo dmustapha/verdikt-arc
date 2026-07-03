@@ -240,6 +240,52 @@ contract VerdiktEscrow {
         _record(workId, msg.sender, worker, amount, fee, ttl, routes);
     }
 
+    /// @notice Gasless funding for the human web path: a RELAYER submits a payer's EIP-3009
+    ///         authorization so the payer spends ZERO gas. Same economics as fundWithAuthorization,
+    ///         with two differences that make the relayer safe to trust with nothing but gas:
+    ///           1. `payer` is an explicit argument (not msg.sender). The relayer is msg.sender and
+    ///              pays gas; the token recovers the signature against `payer`, who is recorded as the
+    ///              escrow payer and whose USDC is pulled.
+    ///           2. the derived EIP-3009 `nonce` ALSO commits to the payout `routes`. Any change to
+    ///              routes — or to workId/worker/amount/fee/ttl/payer — changes the nonce, so the
+    ///              signature no longer recovers to `payer` and the token reverts. A relayer can ONLY
+    ///              submit EXACTLY what the human signed; it can never redirect the bounty or refund.
+    ///         receiveWithAuthorization still forces msg.sender == to (this contract), so the escrow
+    ///         remains the only account that can redeem the signature (H-1 stays closed).
+    function fundWithAuthorizationFor(
+        address payer,
+        bytes32 workId,
+        address worker,
+        uint256 amount,
+        uint256 fee,
+        uint256 ttl,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes calldata sig,
+        PayoutRoutes calldata routes
+    ) external {
+        require(payer != address(0), "payer=0");
+        require(escrows[workId].status == STATUS_EMPTY, "workId exists");
+        require(amount > 0, "amount=0");
+        require(fee < amount, "fee>=amount");
+        require(ttl > 0, "ttl=0");
+        require(worker != address(0), "worker=0");
+
+        (uint8 v, bytes32 r, bytes32 s) = _split(sig);
+        IERC3009(USDC).receiveWithAuthorization(
+            payer,
+            address(this),
+            amount,
+            validAfter,
+            validBefore,
+            keccak256(abi.encode(workId, worker, amount, fee, ttl, payer, routes)),
+            v,
+            r,
+            s
+        );
+        _record(workId, payer, worker, amount, fee, ttl, routes);
+    }
+
     /// @dev Write a FUNDED escrow, bump the accounting, and emit Funded. Shared by both funding
     ///      paths. deadline = now + ttl. Called AFTER the token pull on the native path and BEFORE
     ///      the transferFrom on the hook path — both correct because the state write is the effect.

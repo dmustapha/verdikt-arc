@@ -13,6 +13,7 @@ contract VerdiktEscrowTest is Test {
     address payer = address(0xA11CE);
     address worker = address(0xB0B);
     address verdictWallet = address(0xDEAD);
+    address relayer = address(0x9E1A); // gasless relayer (submits, never signs)
 
     // 65-byte dummy signature (r||s||v). The mock ignores the signature; the contract's
     // _split only requires length 65 and v>=27.
@@ -75,6 +76,71 @@ contract VerdiktEscrowTest is Test {
         vm.prank(payer);
         vm.expectRevert("workId exists");
         escrow.fundWithAuthorization(WORK_ID, worker, AMT, 0, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    // --- Gasless relayer path: fundWithAuthorizationFor ---------------------------------------
+    // The mock ignores the signature/nonce, so the routes-in-nonce tamper-rejection is proven LIVE
+    // (Gate E1). Here we prove the money/accounting/payer-recording semantics of the relayer path.
+
+    function testFundForRecordsPayerNotRelayer() public {
+        uint256 payerBefore = MockUSDC(USDC).balanceOf(payer);
+        vm.prank(relayer);
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+
+        assertEq(MockUSDC(USDC).balanceOf(payer), payerBefore - AMT); // payer's USDC pulled, not relayer's
+        assertEq(MockUSDC(USDC).balanceOf(relayer), 0); // relayer only spent gas
+        assertEq(MockUSDC(USDC).balanceOf(address(escrow)), AMT);
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.payer, payer); // recorded from the arg, NOT msg.sender (the relayer)
+        assertEq(e.worker, worker);
+        assertEq(e.amount, AMT);
+        assertEq(e.fee, FEE);
+        assertEq(e.status, 1); // FUNDED
+    }
+
+    function testFundForThenSettleReleaseIdenticalToNative() public {
+        vm.prank(relayer);
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+        vm.prank(verdictWallet);
+        escrow.settle(WORK_ID, 0, EVIDENCE); // pass -> release bounty to worker, fee to Verdikt
+        assertEq(MockUSDC(USDC).balanceOf(worker), AMT - FEE);
+    }
+
+    function testFundForRejectsZeroPayer() public {
+        vm.prank(relayer);
+        vm.expectRevert("payer=0");
+        escrow.fundWithAuthorizationFor(address(0), WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    function testFundForRejectsFeeGteAmount() public {
+        vm.prank(relayer);
+        vm.expectRevert("fee>=amount");
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, AMT, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    function testFundForRejectsZeroWorker() public {
+        vm.prank(relayer);
+        vm.expectRevert("worker=0");
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, address(0), AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    function testFundForRejectsDoubleFund() public {
+        vm.prank(relayer);
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+        vm.prank(relayer);
+        vm.expectRevert("workId exists");
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, _local());
+    }
+
+    // A relayer-funded escrow with a cross-chain worker route records that route (seller paid on home chain).
+    function testFundForRecordsCrossChainRoute() public {
+        VerdiktEscrow.PayoutRoutes memory r =
+            VerdiktEscrow.PayoutRoutes(6, bytes32(uint256(uint160(worker))), 0, bytes32(0));
+        vm.prank(relayer);
+        escrow.fundWithAuthorizationFor(payer, WORK_ID, worker, AMT, FEE, TTL, 0, type(uint256).max, SIG, r);
+        VerdiktEscrow.Escrow memory e = escrow.getEscrow(WORK_ID);
+        assertEq(e.workerPayoutDomain, 6);
+        assertEq(e.workerPayoutRecipient, bytes32(uint256(uint160(worker))));
     }
 
     function testSettleReleaseToWorker() public {
