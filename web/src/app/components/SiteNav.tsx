@@ -1,10 +1,11 @@
 import Link from 'next/link';
 
-type Route = 'courtroom' | 'try' | 'proof' | 'ledger';
+type Route = 'courtroom' | 'try' | 'hire' | 'proof' | 'ledger';
 
 const LINKS: { href: string; label: string; key: Route }[] = [
   { href: '/courtroom', label: 'Courtroom', key: 'courtroom' },
   { href: '/try', label: 'Try it', key: 'try' },
+  { href: '/hire', label: 'Hire an agent', key: 'hire' },
   { href: '/proof', label: 'Proof', key: 'proof' },
   { href: '/ledger', label: 'Ledger', key: 'ledger' },
 ];
