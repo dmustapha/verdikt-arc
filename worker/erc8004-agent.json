@@ -1,8 +1,8 @@
 {
-  "agentId": "7395",
-  "owner": "0xD089Dfc911ea0A5cA7A54ff912ab73B5531D02D7",
-  "txHash": "0x07c11e6d87045126792011226465b8eba3e77eb3b5cc4384590a76a119d35896",
-  "explorerUrl": "https://sepolia.basescan.org/tx/0x07c11e6d87045126792011226465b8eba3e77eb3b5cc4384590a76a119d35896",
+  "agentId": "7396",
+  "owner": "0xa41FD309CC7ADF0B4EdF76ADAB9A66a848a05834",
+  "txHash": "0x3f86794fad58647dd2ce2c949b3cab0cad5e99c49ef2d413d6c13c4a24dcefa3",
+  "explorerUrl": "https://sepolia.basescan.org/tx/0x3f86794fad58647dd2ce2c949b3cab0cad5e99c49ef2d413d6c13c4a24dcefa3",
   "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
   "agentCard": {
     "type": "https://eips.ethereum.org/EIPS/eip-8004",
