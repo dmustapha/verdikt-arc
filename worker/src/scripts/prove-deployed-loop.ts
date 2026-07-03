@@ -85,9 +85,15 @@ async function main() {
 
   const AVG_TESTS = 'from solution import average\n\ndef test_mean():\n    assert average([2, 4, 6]) == 4\n\ndef test_empty():\n    assert average([]) == 0\n';
   const A2A_URL = process.env.A2A_SELLER_URL ?? 'https://verdikt-a2a-research.fly.dev';
+  const X402_URL = (process.env.X402_SELLER_URL ?? 'https://verdikt-x402-seller.fly.dev') + '/research/dispatch';
   const scenarios: Scenario[] = [
     // Research through the deployed stack (answer / grounding) — proves the full HTTP production loop.
     { skill: 'research', label: 'RESEARCH-RELEASE', route: 'answer', expect: 'release',
+      acceptance: { spec: 'What is the capital of France, and what river runs through it?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
+    // x402 DISPATCH path: the worker's x402Driver pays a sub-cent TOLL, which the seller VERIFIES +
+    // SETTLES on Arc through our SELF-HOSTED facilitator (no public one supports Arc), then delivers.
+    // The bounty stays escrow-gated and is released only by the verdict — x402 is transport, not settlement.
+    { skill: 'research', label: 'X402-RESEARCH-RELEASE', route: 'answer', expect: 'release', sellerUrl: X402_URL, protocol: 'x402',
       acceptance: { spec: 'What is the capital of France, and what river runs through it?', sources: 'France is in Western Europe. Its capital is Paris. The river Seine runs through Paris.' } },
     // A2A DISPATCH path: the worker's a2aDriver resolves the card at the origin root, message/send's the
     // task, and the keeper polls tasks/get — a standard A2A seller, dispatched live (not just over sockets).
