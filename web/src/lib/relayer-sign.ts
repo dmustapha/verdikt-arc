@@ -77,7 +77,10 @@ export function buildAuthorization(p: {
   escrow: `0x${string}`; payer: `0x${string}`; workId: `0x${string}`; worker: `0x${string}`;
   totalUsdc: number; feeUsdc: number; ttlSeconds?: number; routes?: Routes;
 }): {
-  typedData: { domain: typeof USDC_DOMAIN; types: typeof RECEIVE_TYPES; primaryType: 'ReceiveWithAuthorization'; message: Record<string, unknown> };
+  typedData: {
+    domain: typeof USDC_DOMAIN; types: typeof RECEIVE_TYPES; primaryType: 'ReceiveWithAuthorization';
+    message: { from: `0x${string}`; to: `0x${string}`; value: bigint; validAfter: bigint; validBefore: bigint; nonce: `0x${string}` };
+  };
   amount: bigint; fee: bigint; ttl: bigint; validAfter: bigint; validBefore: bigint; routes: Routes;
 } {
   const routes = p.routes ?? LOCAL_ROUTES;

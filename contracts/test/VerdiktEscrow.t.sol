@@ -143,6 +143,18 @@ contract VerdiktEscrowTest is Test {
         assertEq(e.workerPayoutRecipient, bytes32(uint256(uint160(worker))));
     }
 
+    // Lockstep tripwire: the contract's fundWithAuthorizationFor nonce for a FIXED vector must equal
+    // the exact hex the off-chain signers (worker relayer.ts + web relayer-sign.ts) derive. If any of
+    // the three keccak256(abi.encode(...)) implementations drifts, this constant stops matching.
+    function testFundForNonceVectorIsCanonical() public pure {
+        bytes32 workId = bytes32(0x1111111111111111111111111111111111111111111111111111111111111111);
+        address w = 0x2222222222222222222222222222222222222222;
+        address p = 0x3333333333333333333333333333333333333333;
+        VerdiktEscrow.PayoutRoutes memory routes = VerdiktEscrow.PayoutRoutes(0, bytes32(0), 0, bytes32(0));
+        bytes32 nonce = keccak256(abi.encode(workId, w, uint256(60000), uint256(10000), uint256(3600), p, routes));
+        assertEq(nonce, 0x04e7254274bfc99a4bbe564c2c681993848fb46cceb8ac4a740cc80f67599366);
+    }
+
     function testSettleReleaseToWorker() public {
         _fund();
         vm.prank(verdictWallet);
