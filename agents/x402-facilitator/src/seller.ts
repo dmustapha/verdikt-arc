@@ -46,7 +46,15 @@ async function doResearch(brief: Brief): Promise<{ type: string; payload: string
 }
 
 export function buildSellerApp(): express.Express {
-  const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+  // Authenticate to our facilitator on the money-touching methods (verify/settle). The key is shared
+  // out-of-band (Fly secret on both apps); an unauthenticated caller gets 401 and cannot spend the
+  // settler's gas. /supported stays keyless (public discovery).
+  const key = process.env.X402_FACILITATOR_SECRET;
+  const authHeaders: Record<string, string> = key ? { 'x-facilitator-key': key } : {};
+  const facilitator = new HTTPFacilitatorClient({
+    url: FACILITATOR_URL,
+    createAuthHeaders: async () => ({ verify: authHeaders, settle: authHeaders, supported: {} }),
+  });
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 

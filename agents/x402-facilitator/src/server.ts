@@ -1,4 +1,5 @@
 import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { createPublicClient, createWalletClient, http, defineChain } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { x402Facilitator } from '@x402/core/facilitator';
@@ -55,14 +56,27 @@ export function buildApp(facilitator: x402Facilitator): express.Express {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
 
-  app.get('/health', (_req, res) => res.json({ ok: true, service: 'verdikt-x402-facilitator', network: ARC_NETWORK }));
+  // Auth gate for the money-touching routes. /settle submits an on-chain tx paying gas from OUR settler
+  // wallet, so an unauthenticated /settle is an open relay draining our gas. Require a shared key on
+  // /verify + /settle (allowlisted callers = our own x402 sellers). /supported + /health stay public
+  // (read-only discovery + the Fly health probe). Absent secret ⇒ auth disabled (local dev only), logged.
+  const SECRET = process.env.X402_FACILITATOR_SECRET;
+  if (!SECRET) console.warn('[x402-facilitator] X402_FACILITATOR_SECRET unset — /verify /settle are UNAUTHENTICATED (dev only)');
+  const requireKey: express.RequestHandler = (req, res, next) => {
+    if (!SECRET) return next(); // dev
+    const provided = req.get('x-facilitator-key');
+    if (!provided || !safeEqual(provided, SECRET)) { res.status(401).json({ error: 'unauthorized' }); return; }
+    next();
+  };
+
+  app.get('/health', (_req, res) => res.json({ ok: true, service: 'verdikt-x402-facilitator', network: ARC_NETWORK, authed: !!SECRET }));
 
   app.get('/supported', async (_req, res) => {
     try { res.json(await facilitator.getSupported()); }
     catch (e) { res.status(500).json({ error: e instanceof Error ? e.message : 'supported failed' }); }
   });
 
-  app.post('/verify', async (req, res) => {
+  app.post('/verify', requireKey, async (req, res) => {
     try {
       const { paymentPayload, paymentRequirements } = req.body as { paymentPayload: unknown; paymentRequirements: unknown };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +84,7 @@ export function buildApp(facilitator: x402Facilitator): express.Express {
     } catch (e) { res.status(400).json({ isValid: false, invalidReason: 'facilitator_error', invalidMessage: e instanceof Error ? e.message : 'verify failed' }); }
   });
 
-  app.post('/settle', async (req, res) => {
+  app.post('/settle', requireKey, async (req, res) => {
     try {
       const { paymentPayload, paymentRequirements } = req.body as { paymentPayload: unknown; paymentRequirements: unknown };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,6 +93,13 @@ export function buildApp(facilitator: x402Facilitator): express.Express {
   });
 
   return app;
+}
+
+// Constant-time key compare (different lengths ⇒ not equal, no early-exit timing leak).
+function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a), bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
 }
 
 if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
