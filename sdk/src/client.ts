@@ -142,6 +142,9 @@ class PayerApi {
     /** Where the buyer is refunded on a refund/abstain (their home chain). Omit = refunded on Arc. */
     payerRefund?: PayoutRoute;
     maxFeeUsdc?: number;
+    /** Inbound Iris attestation timeout (ms). Raise above the 180s default for standard-finality
+     *  source chains (e.g. Polygon Amoy) whose burn can take 10–20 min to attest. */
+    attestTimeoutMs?: number;
     expiresInSeconds?: number;
     onStep?: (step: string) => void;
   }): Promise<{
@@ -169,7 +172,8 @@ class PayerApi {
     const routes: PayoutRoutes = { worker: params.sellerPayout, payer: params.payerRefund };
     const { burnTxHash, fundTxHash } = await fundCrossChainEscrow({
       account: this.vk._account, amountUsdc: params.amountUsdc, workId, payer, worker: params.seller,
-      routes, config: params.crossChain, maxFeeUsdc: params.maxFeeUsdc, onStep: params.onStep,
+      routes, config: params.crossChain, maxFeeUsdc: params.maxFeeUsdc,
+      attestTimeoutMs: params.attestTimeoutMs, onStep: params.onStep,
     });
 
     // 3. Read the ACTUAL net-of-fee amount the escrow holds, and sign the offer with it.

@@ -337,6 +337,9 @@ export async function fundCrossChainEscrow(params: {
   config: CrossChainConfig;
   maxFeeUsdc?: number;
   minFinalityThreshold?: number;
+  // Inbound Iris attestation timeout. Default 180s suits Fast-Transfer sources; a standard-finality
+  // source (e.g. Polygon Amoy, fastSource=false) can take 10–20 min, so raise it for those.
+  attestTimeoutMs?: number;
   onStep?: (step: string) => void;
 }): Promise<{ burnTxHash: `0x${string}`; fundTxHash: `0x${string}`; workId: `0x${string}`; sourceChain: ChainInfo }> {
   const src = chainInfo(params.config.sourceChain ?? 'baseSepolia');
@@ -345,6 +348,7 @@ export async function fundCrossChainEscrow(params: {
   params.onStep?.(`burned ${burnTxHash}; polling Iris`);
   const { message, attestation } = await pollAttestation({
     burnTxHash, sourceDomain: src.cctpDomain, config: params.config,
+    timeoutMs: params.attestTimeoutMs,
     onPoll: (s) => params.onStep?.(`iris: ${s}`),
   });
   params.onStep?.('attested; relaying to Arc hook');
