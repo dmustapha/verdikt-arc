@@ -7,7 +7,7 @@ vi.mock('../../src/lib/erc8004-writer.js', () => ({
 }));
 vi.mock('../../src/lib/erc8004.js', () => ({ readValidationStatus: vi.fn(async () => null) }));
 
-import { attestSettlement } from '../../src/lib/attestor.js';
+import { attestSettlement, attestAfterSettle, enableAttestation } from '../../src/lib/attestor.js';
 import { openValidationRequest, postValidationResponse } from '../../src/lib/erc8004-writer.js';
 import { readValidationStatus } from '../../src/lib/erc8004.js';
 import type { Task, VerdictResult, Settlement } from '../../src/types.js';
@@ -65,5 +65,30 @@ describe('attestSettlement', () => {
     expect(r.status).toBe('error');
     if (r.status !== 'error') throw new Error('unreachable');
     expect(r.reason).toContain('rpc exploded');
+  });
+
+  it('re-checks after opening the request and skips if a response already exists (no double-post)', async () => {
+    // Fast read: no response yet (stale). After opening, the reliable recheck sees a response.
+    (readValidationStatus as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ validatorAddress: CFG.validator, agentId: 7395n, response: 90, responseHash: '0x' + 'aa'.repeat(32), tag: 'verdikt:release', lastUpdate: 5n });
+    const r = await attestSettlement(T, V, S(), CFG);
+    expect(r.status).toBe('skipped');
+    expect(postValidationResponse).not.toHaveBeenCalled(); // never double-posted
+  });
+});
+
+describe('attestAfterSettle (fire-and-forget wrapper)', () => {
+  it('is a no-op until enabled — imports/tests never fire live writes', async () => {
+    // enableAttestation() has not been called in this test → nothing runs.
+    await attestAfterSettle(T, V, S());
+    expect(openValidationRequest).not.toHaveBeenCalled();
+    expect(postValidationResponse).not.toHaveBeenCalled();
+  });
+
+  it('never rejects even when the writer throws — safe to leave unawaited', async () => {
+    enableAttestation();
+    (openValidationRequest as any).mockRejectedValueOnce(new Error('boom'));
+    await expect(attestAfterSettle(T, V, S())).resolves.toBeUndefined();
   });
 });

@@ -70,6 +70,16 @@ async function migrate() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
   await sql`CREATE INDEX IF NOT EXISTS vk_sellers_status_idx ON vk_sellers(status)`;
 
+  // WS6 — ERC-8004 attestation evidence, keyed by requestHash. bundle_json is TEXT (NOT JSONB) on
+  // purpose: the served bytes must be byte-identical to what keccak256 hashed into the on-chain
+  // responseHash — re-serializing through JSONB would reorder/reformat and break verification.
+  // Durable so a validationResponse's on-chain responseURI keeps resolving across worker restarts.
+  await sql`CREATE TABLE IF NOT EXISTS vk_erc8004_evidence (
+    request_hash TEXT PRIMARY KEY,
+    response_hash TEXT NOT NULL,
+    bundle_json TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+
   console.log('migrate: schema ready');
 }
 

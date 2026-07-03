@@ -8,6 +8,7 @@ import { runToolTraceRoute } from './tool-trace-route.js';
 import { reasonOverEvidence } from './reasoner.js';
 import { settleVerdict, outcomeFor } from '../settlement/settle.js';
 import { buildReceipt } from '../lib/receipt.js';
+import { attestAfterSettle } from '../lib/attestor.js';
 import { sseBus } from '../lib/sse-bus.js';
 import { recordEvidence, recordVerdict, recordSettled, recordReceipt, recordSettleFailed } from '../lib/db.js';
 
@@ -56,6 +57,12 @@ export async function runVerdict(task: Task, artifact: Artifact): Promise<Verdic
     const settlement = await settleVerdict(workId, verdict);
     await recordSettled(workId, settlement.outcome, settlement.txHash);
     sseBus.publish(workId, 'settled', { outcome: settlement.outcome, txHash: settlement.txHash, bps: settlement.bps });
+
+    // Post-settle ERC-8004 attestation — the SINGLE chokepoint both the sync /verdict route and the
+    // async job path settle through. Best-effort, off the money path, fire-and-forget (never awaited,
+    // never throws): it adds zero latency to the verdict response and a Base Sepolia failure can never
+    // affect this already-recorded Arc settlement. Env-gated no-op unless the attestor is configured.
+    void attestAfterSettle(task, verdict, settlement);
 
     // 4. Receipt
     const receipt = await buildReceipt(settlement, verdict, task.amountUsdc);

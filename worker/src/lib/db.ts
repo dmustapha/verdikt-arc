@@ -72,6 +72,21 @@ export async function recordEvidence(workId: string, bundle: EvidenceBundle): Pr
     ON CONFLICT (work_id) DO UPDATE SET bundle = ${JSON.stringify(bundle)}`;
 }
 
+// WS6 — ERC-8004 evidence, keyed by requestHash. bundle_json stored/returned as the EXACT bytes so
+// keccak256(json) still equals the on-chain responseHash after a round-trip through the DB.
+export async function insertErc8004Evidence(requestHash: string, responseHash: string, bundleJson: string): Promise<void> {
+  await sql`
+    INSERT INTO vk_erc8004_evidence (request_hash, response_hash, bundle_json)
+    VALUES (${requestHash}, ${responseHash}, ${bundleJson})
+    ON CONFLICT (request_hash) DO NOTHING`;
+}
+
+export async function getErc8004Evidence(requestHash: string): Promise<{ responseHash: string; json: string } | null> {
+  const r = await sql`SELECT response_hash, bundle_json FROM vk_erc8004_evidence WHERE request_hash = ${requestHash} LIMIT 1`;
+  if (r.rows.length === 0) return null;
+  return { responseHash: r.rows[0].response_hash as string, json: r.rows[0].bundle_json as string };
+}
+
 export async function recordVerdict(workId: string, v: VerdictResult): Promise<void> {
   await sql`
     INSERT INTO vk_verdicts (work_id, verdict, verdict_code, confidence, route, cited_evidence, rationale, abstain_reason, evidence_hash)

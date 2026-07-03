@@ -112,12 +112,14 @@ export interface AgentIdentity {
   agentId: bigint;
   owner: `0x${string}`;
   tokenURI: string;
-  agentWallet: `0x${string}`;    // zero address when the agent hasn't set a bound wallet
+  agentWallet: `0x${string}`;    // ERC-8004 agent-wallet resolver value (may default to the owner, or
+                                 // be a distinctly-bound wallet via setAgentWallet); zero if it reverts
 }
 
 // Read a registered seller's on-chain identity card. Returns null for a nonexistent agentId
-// (ownerOf reverts). getAgentWallet is best-effort: some agents never bind a wallet, so a revert
-// there degrades to the zero address rather than failing the whole read.
+// (ownerOf reverts). getAgentWallet is best-effort — a revert (or absent binding) degrades to the
+// zero address rather than failing the whole read; do NOT assume its value is an explicitly-bound
+// wallet (the registry may resolve it to the owner by default).
 export async function readAgentIdentity(
   agentId: bigint, client?: ReadClient,
 ): Promise<AgentIdentity | null> {
