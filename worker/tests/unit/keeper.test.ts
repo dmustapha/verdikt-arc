@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { pollOnce, expireOnce, guardedInterval } from '../../src/lib/keeper.js';
+import { pollOnce, expireOnce, finalizeOnce, guardedInterval } from '../../src/lib/keeper.js';
 import type { KeeperDeps } from '../../src/lib/keeper.js';
 import type { JobRow } from '../../src/lib/job-store.js';
 import type { SellerTransport } from '../../src/lib/transport.js';
@@ -16,19 +16,20 @@ function job(over: Partial<JobRow> = {}): JobRow {
   };
 }
 
-function deps(over: Partial<KeeperDeps> = {}): { deps: KeeperDeps; onDelivery: ReturnType<typeof vi.fn>; expireJob: ReturnType<typeof vi.fn>; fetchResult: ReturnType<typeof vi.fn> } {
+function deps(over: Partial<KeeperDeps> = {}): { deps: KeeperDeps; onDelivery: ReturnType<typeof vi.fn>; expireJob: ReturnType<typeof vi.fn>; finalizeProposedJob: ReturnType<typeof vi.fn>; fetchResult: ReturnType<typeof vi.fn> } {
   const onDelivery = vi.fn().mockResolvedValue(undefined);
   const expireJob = vi.fn().mockResolvedValue({ expired: true });
+  const finalizeProposedJob = vi.fn().mockResolvedValue({ finalized: true });
   const fetchResult = vi.fn().mockResolvedValue(null);
   const transport: SellerTransport = { dispatch: vi.fn(), fetchResult };
   const base: KeeperDeps = {
-    engine: { onDelivery, expireJob },
+    engine: { onDelivery, expireJob, finalizeProposedJob },
     listByState: vi.fn().mockResolvedValue([]),
     transport,
     now: () => Date.now(),
     ...over,
   };
-  return { deps: base, onDelivery, expireJob, fetchResult };
+  return { deps: base, onDelivery, expireJob, finalizeProposedJob, fetchResult };
 }
 
 describe('keeper — pollOnce (delivery fallback)', () => {
@@ -96,6 +97,42 @@ describe('keeper — expireOnce (no-show)', () => {
     expect(states).toEqual(expect.arrayContaining(['FUNDED', 'DISPATCHED', 'AWAITING_DELIVERY', 'DELIVERED', 'VERIFYING']));
     expect(states).not.toContain('SETTLED');
     expect(states).not.toContain('EXPIRED');
+  });
+});
+
+describe('keeper — finalizeOnce (WS11 undisputed challenge windows)', () => {
+  it('finalizes PROPOSED jobs (queries only PROPOSED; engine gates the window)', async () => {
+    const j = job({ state: 'PROPOSED' });
+    const listByState = vi.fn().mockResolvedValue([j]);
+    const { deps: d, finalizeProposedJob } = deps({ listByState });
+    const n = await finalizeOnce(d);
+    expect(listByState.mock.calls[0][0]).toEqual(['PROPOSED']);
+    expect(finalizeProposedJob).toHaveBeenCalledWith('j1');
+    expect(n).toBe(1);
+  });
+
+  it('counts only jobs the engine actually finalized (window still open → skipped)', async () => {
+    const finalizeProposedJob = vi.fn()
+      .mockResolvedValueOnce({ finalized: true })
+      .mockResolvedValueOnce({ finalized: false, reason: 'challenge window still open' });
+    const { deps: d } = deps({
+      listByState: vi.fn().mockResolvedValue([job({ jobId: 'a', state: 'PROPOSED' }), job({ jobId: 'b', state: 'PROPOSED' })]),
+      engine: { onDelivery: vi.fn(), expireJob: vi.fn(), finalizeProposedJob },
+    });
+    const n = await finalizeOnce(d);
+    expect(n).toBe(1);
+  });
+
+  it('isolates a failing finalize — one throw does not abort the batch', async () => {
+    const finalizeProposedJob = vi.fn()
+      .mockRejectedValueOnce(new Error('rpc down'))
+      .mockResolvedValueOnce({ finalized: true });
+    const { deps: d } = deps({
+      listByState: vi.fn().mockResolvedValue([job({ jobId: 'bad', state: 'PROPOSED' }), job({ jobId: 'good', state: 'PROPOSED' })]),
+      engine: { onDelivery: vi.fn(), expireJob: vi.fn(), finalizeProposedJob },
+    });
+    const n = await finalizeOnce(d);
+    expect(n).toBe(1);
   });
 });
 
