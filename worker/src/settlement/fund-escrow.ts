@@ -6,7 +6,7 @@ import { VERDIKT_ESCROW_ABI } from './escrow-abi.js';
 // USDC EIP-712 domain. Arc USDC reports name()="USDC" (NOT "USD Coin") and version()="2"; the wrong
 // name yields "FiatTokenV2: invalid signature" at funding. The fallback is the confirmed on-chain
 // value so a missing env var can never silently break funding.
-const USDC_DOMAIN = {
+export const USDC_DOMAIN = {
   name: process.env.USDC_EIP712_NAME ?? 'USDC',
   version: process.env.USDC_EIP712_VERSION ?? '2',
   chainId: 5042002,
@@ -16,7 +16,7 @@ const USDC_DOMAIN = {
 // H-1: sign a ReceiveWithAuthorization (not TransferWithAuthorization). The 6 fields are identical;
 // only the EIP-712 primaryType/typehash differs. receiveWithAuthorization forces msg.sender == to at
 // the token, so the escrow is the only account that can redeem this signature — front-run closed.
-const RECEIVE_TYPES = {
+export const RECEIVE_TYPES = {
   ReceiveWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },
