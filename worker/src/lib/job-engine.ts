@@ -37,6 +37,9 @@ export interface EngineDeps {
   verify(task: Task, artifact: Artifact): Promise<VerdictRunResult>;   // default: orchestrator.runVerdict
   getTask(workId: string): Promise<Task | null>;
   refundExpiredOnChain(workId: `0x${string}`): Promise<string>;        // default: settlement/expire
+  // OPTIONAL, off the money path: post-settle ERC-8004 attestation. Runs AFTER markSettled, is
+  // best-effort, and is guarded so it can never affect a completed settlement (default: unset = no-op).
+  attest?(task: Task, run: VerdictRunResult): Promise<void>;
   now(): number;
   dispatch: { maxAttempts: number; baseDelayMs: number; sleep(ms: number): Promise<void> };
 }
@@ -125,6 +128,12 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     const result = await verify(task, artifact);
     if (result.txHash) {
       await store.markSettled(job.jobId, result.outcome as Outcome, result.txHash);
+      // Post-settle attestation is strictly off the money path: the settlement is already recorded, so
+      // guard it and swallow any failure — an ERC-8004 hiccup must never surface as a settlement error.
+      if (deps.attest) {
+        try { await deps.attest(task, result); }
+        catch (e) { await store.recordJobError(job.jobId, `erc8004 attestation failed (non-fatal): ${String((e as Error)?.message ?? e)}`); }
+      }
     } else {
       await store.recordJobError(job.jobId, result.error ?? 'settlement did not confirm');
     }
