@@ -13,7 +13,7 @@ import type { JobState } from './job-machine.js';
 // job is isolated (one seller's failure never aborts the batch).
 
 export interface KeeperDeps {
-  engine: Pick<JobEngine, 'onDelivery' | 'expireJob'>;
+  engine: Pick<JobEngine, 'onDelivery' | 'expireJob' | 'finalizeProposedJob'>;
   listByState(states: JobState[]): Promise<JobRow[]>;
   transport: SellerTransport;
   now(): number;
@@ -54,6 +54,25 @@ export async function expireOnce(deps: KeeperDeps): Promise<number> {
   return expired;
 }
 
+// WS11 — finalize sweep: a disputable job that no one contested must still settle. Each PROPOSED job
+// whose challenge window has closed is settled to its held verdict (engine.finalizeProposedJob checks the
+// window, so a still-open job is a no-op). The challenge window is much shorter than the escrow TTL, so
+// this fires well before expireOnce could no-show the same job; if they ever race, the on-chain
+// FUNDED-once guard means only one settlement lands. Each job is isolated (one failure never aborts the batch).
+export async function finalizeOnce(deps: KeeperDeps): Promise<number> {
+  const jobs = await deps.listByState(['PROPOSED']);
+  let finalized = 0;
+  for (const job of jobs) {
+    try {
+      const r = await deps.engine.finalizeProposedJob(job.jobId);
+      if (r.finalized) finalized++;
+    } catch {
+      /* transient settle failure — the next tick retries; the escrow deadline is the ultimate backstop */
+    }
+  }
+  return finalized;
+}
+
 // Run `fn` on an interval, but SKIP a tick if the previous run is still in flight — otherwise a slow
 // sweep (e.g. expireOnce firing on-chain refunds) could overlap itself and fire duplicate txs for the
 // same job (safe on-chain via FUNDED-once, but wasted gas). Exposed for unit testing.
@@ -70,8 +89,9 @@ export function guardedInterval(fn: () => Promise<unknown>, ms: number): { tick:
 }
 
 // Start the background sweeps. Env-guarded by the caller so imports/tests never spawn timers.
-export function startKeeper(deps: KeeperDeps, opts: { pollMs: number; expireMs: number }): () => void {
+export function startKeeper(deps: KeeperDeps, opts: { pollMs: number; expireMs: number; finalizeMs: number }): () => void {
   const poll = guardedInterval(() => pollOnce(deps), opts.pollMs);
   const expire = guardedInterval(() => expireOnce(deps), opts.expireMs);
-  return () => { poll.stop(); expire.stop(); };
+  const finalize = guardedInterval(() => finalizeOnce(deps), opts.finalizeMs);
+  return () => { poll.stop(); expire.stop(); finalize.stop(); };
 }

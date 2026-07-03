@@ -4,13 +4,33 @@ import type { SellerTransport } from './transport.js';
 import { sellerAdapter } from './adapter/index.js';
 import { a2aDriver } from './adapter/a2a.js';
 import { x402Driver } from './adapter/x402.js';
-import { runVerdict } from '../engine/orchestrator.js';
-import { getTask } from './db.js';
+import { runVerdict, computeVerdict, settleGivenVerdict } from '../engine/orchestrator.js';
+import { getTask, getVerdict, getEvidence } from './db.js';
 import { refundExpiredOnChain } from '../settlement/expire.js';
 import { makeEngine } from './job-engine.js';
 import type { JobStore } from './job-engine.js';
 import { startKeeper } from './keeper.js';
 import { sseBus } from './sse-bus.js';
+import { arbitrate } from './arbiter.js';
+import type { VerdictResult, VerdictLabel, ArtifactType } from '../types.js';
+
+// Reconstruct the held (proposed) verdict from its recorded row so the dispute/finalize path can settle
+// it. Lossless for settlement: the score is re-derived from confidence exactly as the engine emitted it
+// (score = round(confidence*100)), and planSettlement falls back to confidence anyway.
+async function getProposedVerdict(workId: string): Promise<VerdictResult | null> {
+  const vv = await getVerdict(workId);
+  if (!vv) return null;
+  return {
+    verdict: vv.verdict as VerdictLabel,
+    confidence: vv.confidence ?? 0,
+    score: vv.confidence != null ? Math.round(vv.confidence * 100) : undefined,
+    citedEvidence: Array.isArray(vv.citedEvidence) ? (vv.citedEvidence as string[]) : [],
+    rationale: vv.rationale ?? '',
+    route: vv.route as ArtifactType,
+    evidenceHash: vv.evidenceHash as `0x${string}`,
+    verdictCode: vv.verdictCode,
+  };
+}
 
 // Production job engine, wired to the real store / generic seller adapter / verdict engine / on-chain
 // refund. A single shared instance so the jobs routes, the callback router, and the keeper all drive
@@ -68,6 +88,16 @@ export const engine = makeEngine({
     baseDelayMs: Number(process.env.DISPATCH_BASE_DELAY_MS ?? 1000),
     sleep,
   },
+  // WS11 dispute wiring. A disputable job HOLDS via computeVerdict (verify, no settle), then settles the
+  // held or arbiter-ruled verdict via settleGivenVerdict — the SAME money path (records + attests +
+  // receipts). The arbiter is the deterministic mock (arbiter.ts). challengeWindowMs is the default hold
+  // length; keep it well under the escrow TTL so an undisputed job finalizes before the no-show clock.
+  propose: computeVerdict,
+  settleGiven: settleGivenVerdict,
+  getProposedVerdict,
+  getEvidence,
+  arbitrate,
+  challengeWindowMs: Number(process.env.CHALLENGE_WINDOW_MS ?? 5 * 60 * 1000),
 });
 
 // Start the background keeper (poll fallback + no-show expiry). Env-guarded: importing this module
@@ -78,6 +108,8 @@ export function startWorkerKeeper(): () => void {
     {
       pollMs: Number(process.env.KEEPER_POLL_MS ?? 15_000),
       expireMs: Number(process.env.KEEPER_EXPIRE_MS ?? 60_000),
+      // WS11: finalize undisputed PROPOSED jobs as soon as their (short) challenge window closes.
+      finalizeMs: Number(process.env.KEEPER_FINALIZE_MS ?? 15_000),
     },
   );
 }
