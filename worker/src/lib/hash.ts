@@ -14,3 +14,9 @@ function canonical(value: unknown): string {
 export function hashEvidence(bundle: EvidenceBundle): `0x${string}` {
   return keccak256(toBytes(canonical(bundle)));
 }
+
+// keccak256 of ANY key-sorted-canonical value. Used to anchor a WS11 arbiter ruling on-chain with an
+// evidenceHash that is distinct from — and deterministically derived from — the disputed verdict.
+export function hashCanonical(value: unknown): `0x${string}` {
+  return keccak256(toBytes(canonical(value)));
+}
