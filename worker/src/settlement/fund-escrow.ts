@@ -1,4 +1,4 @@
-import { createWalletClient, createPublicClient, http, parseUnits, encodeFunctionData, keccak256, encodeAbiParameters } from 'viem';
+import { createWalletClient, createPublicClient, http, parseUnits, encodeFunctionData, keccak256, encodeAbiParameters, pad } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet, ARC_USDC_ADDRESS } from '../lib/chains.js';
 import { VERDIKT_ESCROW_ABI } from './escrow-abi.js';
@@ -48,6 +48,9 @@ export async function fundEscrow(params: {
   amountUsdc: number;       // TOTAL escrowed (bounty + fee)
   feeUsdc?: number;         // verdict fee subset (default 0)
   ttlSeconds?: number;      // no-show deadline horizon (default 7 days)
+  // Cross-chain worker payout route (default = local Arc). When domain != 0, release BURNS the bounty
+  // via CCTP to `recipient` on that CCTP domain (the seller's home chain); a relayer then mints it there.
+  sellerPayout?: { domain: number; recipient: `0x${string}` };
 }): Promise<`0x${string}`> {
   const account = privateKeyToAccount(params.payerKey);
   const escrow = process.env.ESCROW_ADDRESS as `0x${string}`;
@@ -77,11 +80,17 @@ export async function fundEscrow(params: {
     message: { from: account.address, to: escrow, value, validAfter, validBefore, nonce },
   });
 
+  // Payout routes: local Arc by default, or a cross-chain worker route when sellerPayout.domain != 0
+  // (release burns the bounty to that CCTP domain; the payer refund route always stays local on Arc).
+  const routes = params.sellerPayout && params.sellerPayout.domain !== 0
+    ? { workerDomain: params.sellerPayout.domain, workerRecipient: pad(params.sellerPayout.recipient), payerDomain: 0, payerRecipient: `0x${'00'.repeat(32)}` as `0x${string}` }
+    : LOCAL_ROUTES;
+
   // The payer submits fundWithAuthorization; the contract pulls USDC via the signature.
   const data = encodeFunctionData({
     abi: VERDIKT_ESCROW_ABI,
     functionName: 'fundWithAuthorization',
-    args: [params.workId, params.worker, value, fee, ttl, validAfter, validBefore, signature, LOCAL_ROUTES],
+    args: [params.workId, params.worker, value, fee, ttl, validAfter, validBefore, signature, routes],
   });
   const hash = await wallet.sendTransaction({ to: escrow, data });
   const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 30_000 });
