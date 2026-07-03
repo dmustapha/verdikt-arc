@@ -29,6 +29,26 @@ export const VERDIKT_ESCROW_ABI = [
     outputs: [],
   },
   {
+    // Gasless human path: a relayer submits the payer's authorization (payer pays zero gas). The
+    // nonce commits to routes, so the relayer can only submit exactly what the payer signed.
+    type: 'function',
+    name: 'fundWithAuthorizationFor',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'payer', type: 'address' },
+      { name: 'workId', type: 'bytes32' },
+      { name: 'worker', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'fee', type: 'uint256' },
+      { name: 'ttl', type: 'uint256' },
+      { name: 'validAfter', type: 'uint256' },
+      { name: 'validBefore', type: 'uint256' },
+      { name: 'sig', type: 'bytes' },
+      PAYOUT_ROUTES,
+    ],
+    outputs: [],
+  },
+  {
     type: 'function',
     name: 'settle',
     stateMutability: 'nonpayable',
