@@ -13,6 +13,10 @@ import { buildSellerBrief } from './seller-brief.js';
 // so the demo resolves quickly; it MUST be well under the escrow's on-chain TTL so an undisputed job
 // finalizes before the no-show clock could expire it.
 const DEFAULT_CHALLENGE_WINDOW_MS = 5 * 60 * 1000;
+// Safety margin: the challenge window must close far enough before the escrow's no-show deadline that
+// the keeper's finalize sweep can settle the held verdict FIRST. Otherwise a misconfigured window
+// (challengeWindowMs ≥ escrow TTL) could let refundExpired fire before the verdict finalizes.
+const CHALLENGE_DEADLINE_MARGIN_MS = 60 * 1000;
 
 // The WS3 job engine: the ONE place that drives a funded escrow through the async lifecycle
 // (dispatch → await delivery → verify → settle) and the no-show path (expire → refundExpired). Every
@@ -184,7 +188,10 @@ export function makeEngine(deps: EngineDeps): JobEngine {
     if (job.disputable && deps.propose && store.markProposed) {
       await deps.propose(task, artifact); // records evidence + verdict + streams the courtroom, no settle
       const windowMs = job.challengeWindowMs ?? deps.challengeWindowMs ?? DEFAULT_CHALLENGE_WINDOW_MS;
-      const challengeDeadline = new Date(now() + windowMs);
+      // Clamp so the window always closes before the escrow's no-show deadline (minus a margin), so the
+      // finalize sweep settles the held verdict before refundExpired could ever fire.
+      const safeLatest = job.deadline.getTime() - CHALLENGE_DEADLINE_MARGIN_MS;
+      const challengeDeadline = new Date(Math.min(now() + windowMs, safeLatest));
       if (await store.markProposed(job.jobId, challengeDeadline)) emit(job.workId, 'PROPOSED');
       return;
     }

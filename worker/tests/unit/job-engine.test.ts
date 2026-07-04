@@ -268,6 +268,17 @@ describe('job-engine — WS11 dispute/escalation path', () => {
     expect(emittedStates(ctx.emit)).toContain('PROPOSED');
   });
 
+  it('clamps the challenge window so it never outlasts the escrow deadline', async () => {
+    const t = 1_000_000_000;
+    // Escrow deadline only 30s out, but a 60s challenge window requested → must clamp to deadline−margin.
+    const ctx = disputableCtx({ now: () => t, challengeWindowMs: 60_000 });
+    await ctx.engine.startJob({ ...disputable, deadline: new Date(t + 30_000) });
+    await ctx.engine.onDelivery(ctx.store.rows.get('j1')!, { artifact });
+    const cd = ctx.store.rows.get('j1')!.challengeDeadline!.getTime();
+    expect(cd).toBe(t + 30_000 - 60_000);         // clamped to escrow deadline − 60s margin
+    expect(cd).toBeLessThan(t + 60_000);          // did NOT use the full requested 60s window
+  });
+
   it('an UNWIRED engine never strands a disputable job — it falls through to a normal settle', async () => {
     // No dispute deps provided: the disputable flag cannot be honored, so the job must still settle.
     const ctx = mkEngine();
