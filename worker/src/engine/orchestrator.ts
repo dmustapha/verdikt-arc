@@ -43,19 +43,29 @@ export async function computeVerdict(task: Task, artifact: Artifact): Promise<{ 
   const { workId } = task;
   sseBus.publish(workId, 'route_selected', { route: task.type });
 
-  // 1. Evidence
-  const bundle = await routeArtifact(task, artifact);
+  // 1–2. Route the artifact into evidence + reason into a verdict (the PURE judgment).
+  const { verdict, bundle } = await evaluateArtifact(task, artifact);
+
+  // Record + stream (the stateful half — needs a vk_tasks row; skipped by the stateless evaluate path).
   await recordEvidence(workId, bundle);
   for (const item of bundle.items) sseBus.publish(workId, 'evidence_item', item);
-
-  // 2. Verdict (reason over evidence; deterministic guards inside)
-  const verdict = await reasonOverEvidence(bundle);
   await recordVerdict(workId, verdict);
   sseBus.publish(workId, 'verdict', {
     verdict: verdict.verdict, confidence: verdict.confidence,
     citedEvidence: verdict.citedEvidence, abstainReason: verdict.abstainReason,
   });
 
+  return { verdict, bundle };
+}
+
+// The PURE verdict — route the artifact into evidence and reason over it — with NO DB writes and NO SSE.
+// This is the single judgment brain, reused by any caller that only needs a verdict and has no escrow /
+// vk_tasks row to record against (WS12: the ACP evaluator judges an ACP deliverable this way — Verdikt
+// renders the verdict, ACP settles on its own rails, nothing touches Arc). Only reads task.type +
+// task.acceptance, so callers pass a minimal task (a synthetic workId is fine; it is never persisted).
+export async function evaluateArtifact(task: Task, artifact: Artifact): Promise<{ verdict: VerdictResult; bundle: EvidenceBundle }> {
+  const bundle = await routeArtifact(task, artifact);
+  const verdict = await reasonOverEvidence(bundle);
   return { verdict, bundle };
 }
 
