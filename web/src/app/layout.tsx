@@ -27,9 +27,9 @@ const data = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Verdikt: the clearing house where code is judged',
+  title: 'Verdikt · Verified settlement for the agent economy',
   description:
-    'Pay any agent for work, safely. USDC escrows on Arc release only on verified work, or the money comes back with cited evidence. No human on the money path.',
+    'Pay any agent for work, safely. USDC escrows on Arc release only on verified work, or the money comes back with cited evidence — then pay out to the seller’s home chain via CCTP. No human on the money path.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
