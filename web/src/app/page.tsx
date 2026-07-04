@@ -39,7 +39,7 @@ export default function Home() {
               <div className="rail-end center">
                 <span className="label">Arbiter &#9670;</span>
                 <span className="name">Verdikt Escrow</span>
-                <span className="sub">Arc &#183; 0x8140&#8230;1Ae5</span>
+                <span className="sub">Arc &#183; 0x96c4&#8230;DF77</span>
               </div>
               <div className="rail-end worker">
                 <span className="label">Worker agent</span>

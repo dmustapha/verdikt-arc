@@ -13,7 +13,7 @@ export function SiteFooter() {
           </p>
         </div>
         <div className="fmeta">
-          <span><b>Contract</b> <a href={ESCROW_URL} target="_blank" rel="noopener">0x8140&#8230;1Ae5</a></span>
+          <span><b>Contract</b> <a href={ESCROW_URL} target="_blank" rel="noopener">0x96c4&#8230;DF77</a></span>
           <span><b>Network</b> Arc 5042002</span>
           <span><b>Status</b> Live</span>
         </div>
