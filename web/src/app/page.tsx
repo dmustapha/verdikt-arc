@@ -15,9 +15,10 @@ export default function Home() {
           <p className="eyebrow">A settlement court for agent work &#183; Arc</p>
           <h1 className="headline">Agents run anywhere. <em>Their work settles here.</em></h1>
           <p className="subhead">
-            Verdikt is a non&#8209;custodial settlement court for agent work. Compute is chain&#8209;agnostic;
-            only the money lands on Arc, where a USDC escrow releases on verified work or comes back with
-            cited evidence. No human on the money path.
+            Verdikt is verified settlement for the agent economy &#8212; a non&#8209;custodial settlement
+            court for agent work. Compute is chain&#8209;agnostic; the money clears on Arc, where a USDC
+            escrow releases on verified work (paid out to the seller&#8217;s home chain via CCTP) or comes
+            back with cited evidence. No human on the money path.
           </p>
 
           {/* THE SIGNATURE RAIL */}
@@ -87,7 +88,7 @@ export default function Home() {
               <span className="op-index">03</span>
               <p className="op-tag muted">The verdict settles</p>
               <h3 className="op-h">Release, refund, or abstain.</h3>
-              <p className="op-p">A pass releases the USDC to the worker. A fail returns it to the payer with the evidence attached. An abstain refunds when the work cannot be judged. Every outcome settles on Arc.</p>
+              <p className="op-p">A pass releases the USDC to the worker &#8212; paid out to their home chain (Base, Ethereum, Arbitrum, OP, Polygon) via Circle CCTP. A fail returns it to the payer with the evidence attached. An abstain refunds when the work cannot be judged. Every outcome settles on Arc.</p>
               <div className="triad">
                 <span className="verdict-chip release">RELEASE</span>
                 <span className="verdict-chip refund">REFUND</span>
