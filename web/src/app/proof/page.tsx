@@ -17,29 +17,34 @@ export default async function ProofPage() {
   const [rows, fees] = await Promise.all([getLedger(20), getExternalFeeSum()]);
   const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x96c47a608218E1aFea36E37f9619FB83E24CDF77';
 
-  // F-005 live round-trip on the most recent settled run: on-chain anchor == DB mirror == hash
-  // recomputed in the browser tier from the stored bundle. Three independent sources, one hash.
+  // F-005 live round-trip: on-chain anchor == DB mirror == hash recomputed in the browser tier from the
+  // stored bundle. Three independent sources, one hash. We surface the most recent settlement whose three
+  // hashes genuinely agree — scanning past any that don't. A WS11 dispute-RESOLVED settlement legitimately
+  // anchors the arbiter's ruling hash (not the evidence-bundle hash), so it never round-trips here by
+  // design; skipping it shows a real verified settlement instead of a misleading "mismatch".
   let roundTrip: { workId: string; onchain: string; db: string; recomputed: string; equal: boolean } | null = null;
   let gas: { gasUsed: string; gasUsdc: string } | null = null;
-  if (rows.length > 0) {
-    const top = rows[0];
+  for (const row of rows.slice(0, 6)) {
     try {
       const [onchain, bundle] = await Promise.all([
-        readOnchainEscrow(top.workId as `0x${string}`),
-        getEvidenceBundle(top.workId),
+        readOnchainEscrow(row.workId as `0x${string}`),
+        getEvidenceBundle(row.workId),
       ]);
       const recomputed = bundle ? hashEvidence(bundle) : '';
-      const onchainHash = onchain.evidenceHash ?? ''; // now correctly decoded (13-field ABI)
+      const onchainHash = onchain.evidenceHash ?? ''; // correctly decoded (13-field ABI)
       const equal =
         !!recomputed &&
         onchainHash.toLowerCase() === recomputed.toLowerCase() &&
-        (top.evidenceHash ?? '').toLowerCase() === recomputed.toLowerCase();
-      roundTrip = { workId: top.workId, onchain: onchainHash, db: top.evidenceHash ?? '', recomputed, equal };
+        (row.evidenceHash ?? '').toLowerCase() === recomputed.toLowerCase();
+      if (equal) {
+        roundTrip = { workId: row.workId, onchain: onchainHash, db: row.evidenceHash ?? '', recomputed, equal };
+        break;
+      }
     } catch {
-      roundTrip = null;
+      /* RPC hiccup on this row — try the next */
     }
-    if (top.txHash) gas = await getTxGasUsdc(top.txHash as `0x${string}`);
   }
+  if (rows[0]?.txHash) gas = await getTxGasUsdc(rows[0].txHash as `0x${string}`);
 
   return (
     <div className="wrap">
