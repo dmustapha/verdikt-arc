@@ -8,6 +8,11 @@ import { LIFECYCLE, reachedStep, isTerminal, stateLabel, stateTone } from '../..
 const WORKER_BASE = process.env.NEXT_PUBLIC_WORKER_URL ?? '';
 const STEP_LABEL = ['Escrowed', 'Awaiting delivery', 'Delivered', 'Verifying', 'Settled'];
 
+interface Dispute {
+  by: string | null; reason: string | null; arbiterOutcome: string | null;
+  arbiterUpheld: boolean | null; arbiterRationale: string | null; arbiterMock: boolean;
+}
+
 interface Detail {
   jobId: string; workId: `0x${string}`; state: string; sellerProtocol: string;
   dispatchAttempts: number; outcome: string | null; settleTxHash: string | null;
@@ -17,6 +22,12 @@ interface Detail {
     amountUsdc: string; feeUsdc: string; deadline: string } | null;
   verdict: { verdict: string; verdictCode: number; confidence: number | null; route: string;
     rationale: string | null; abstainReason: string | null; evidenceHash: string; citedEvidence: unknown } | null;
+  // WS11 dispute/escalation. `disputable` opts the job into the challenge-window path; while PROPOSED a
+  // party may contest before any money moves. `dispute` is the recorded contest + the MOCKED arbiter's
+  // ruling (arbiterMock is always true — an honest boundary, a demo stand-in for real UMA/Kleros).
+  disputable?: boolean;
+  challengeDeadline?: string | null;
+  dispute?: Dispute | null;
 }
 
 // The returnable job DETAIL (WS8). Fetches the enriched worker view (DB state + independent on-chain
@@ -27,6 +38,10 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
   const [d, setD] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [liveState, setLiveState] = useState<string | null>(null); // last SSE job_state, overrides d.state
+  const [disputing, setDisputing] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeErr, setDisputeErr] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now()); // drives the challenge-window countdown
   const esRef = useRef<EventSource | null>(null);
 
   const fetchDetail = useCallback(async () => {
@@ -38,6 +53,29 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
       return data as Detail;
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); return null; }
   }, [jobId]);
+
+  // Dispute a held (PROPOSED) verdict. Server proxy injects the control-plane secret; the worker
+  // escalates to the mocked arbiter, which rules + settles on-chain. We re-fetch to show RESOLVED.
+  const submitDispute = useCallback(async () => {
+    setDisputing(true); setDisputeErr(null);
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/dispute`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ by: 'payer', reason: disputeReason.trim() || 'Requesting arbiter review before payout.' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.resolved === false) throw new Error(data.reason ?? data.error ?? 'dispute could not be resolved');
+      await fetchDetail(); // pull the RESOLVED state + arbiter ruling
+    } catch (e) { setDisputeErr(e instanceof Error ? e.message : String(e)); }
+    finally { setDisputing(false); }
+  }, [jobId, disputeReason, fetchDetail]);
+
+  // Tick once a second while a challenge window is open, so the countdown stays live.
+  useEffect(() => {
+    if (!d?.challengeDeadline) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [d?.challengeDeadline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +92,9 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
         if (msg.type === 'job_state' && typeof msg.data?.state === 'string') {
           const s = msg.data.state as string;
           setLiveState(s);
-          if (isTerminal(s)) void fetchDetail(); // pull the settled outcome + verdict from truth
+          // Re-fetch on a terminal state (pull the settled outcome + verdict) OR when the job enters the
+          // WS11 dispute branch, so a live tab surfaces the challenge window + arbiter ruling.
+          if (isTerminal(s) || s === 'PROPOSED' || s === 'DISPUTED' || s === 'ESCALATED') void fetchDetail();
         }
         if (msg.type === 'settled' || msg.type === 'verdict') void fetchDetail();
       };
@@ -79,6 +119,12 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
   // shows Delivered/Verifying as completed. The terminal outcome still renders at step 4.
   const reached = reachedStep(state, !!d.artifact, !!d.verdict);
   const settleTx = d.settleTxHash;
+
+  // WS11 dispute surface. The window is open only while PROPOSED; a recorded ruling shows afterwards.
+  const inWindow = state === 'PROPOSED' && !!d.challengeDeadline && new Date(d.challengeDeadline).getTime() > nowMs;
+  const msLeft = d.challengeDeadline ? new Date(d.challengeDeadline).getTime() - nowMs : 0;
+  const countdown = msLeft > 0 ? `${Math.floor(msLeft / 60000)}m ${Math.floor((msLeft % 60000) / 1000)}s` : 'closing…';
+  const ruling = d.dispute && (d.dispute.arbiterOutcome || d.dispute.by) ? d.dispute : null;
 
   return (
     <>
@@ -140,6 +186,42 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
           ) : <p className="jt-dim">{isTerminal(state) ? 'No verdict recorded.' : 'Awaiting the agent’s work…'}</p>}
         </div>
       </div>
+
+      {/* WS11 — challenge window: while a disputable verdict is PROPOSED, funds are still held on-chain
+          and a party may contest before any money moves. */}
+      {inWindow && (
+        <div className="jd-panel jd-dispute">
+          <p className="jd-panel-h">Challenge window <span className="jt-dim">· {countdown} left</span></p>
+          <p className="jd-rationale">This verdict is <b>held</b> — the escrow is still funded and nothing has settled. You can accept it (it settles automatically when the window closes) or dispute it now for an arbiter review.</p>
+          <label className="jd-dispute-label" htmlFor="jd-dispute-reason">Reason (optional)</label>
+          <textarea id="jd-dispute-reason" className="jd-dispute-input" rows={2}
+            placeholder="Why should this verdict be reviewed?" value={disputeReason}
+            onChange={(e) => setDisputeReason(e.target.value)} disabled={disputing} />
+          <button className="btn btn-ghost" onClick={submitDispute} disabled={disputing}>
+            {disputing ? 'Escalating to arbiter…' : 'Dispute this verdict'}
+          </button>
+          {disputeErr && <p className="hf-error jd-note">{disputeErr}</p>}
+        </div>
+      )}
+
+      {/* WS11 — the arbiter's ruling once a dispute has been resolved. */}
+      {ruling && (
+        <div className="jd-panel jd-arbiter">
+          <p className="jd-panel-h">Arbiter ruling
+            {ruling.arbiterMock && <span className="jd-mock-badge" title="A deterministic demo stand-in — not real decentralized arbitration. UMA / Kleros is the roadmap.">arbiter · mock</span>}</p>
+          {ruling.arbiterOutcome ? (
+            <>
+              <p className="jd-verdict" data-v={ruling.arbiterOutcome === 'release' ? 'pass' : ruling.arbiterOutcome === 'abstain' ? 'abstain' : ruling.arbiterOutcome === 'partial' ? 'partial' : 'fail'}>
+                {ruling.arbiterOutcome.toUpperCase()}
+                <span className="jt-dim"> · {ruling.arbiterUpheld ? 'upheld the verdict' : 'overturned the verdict'}</span>
+              </p>
+              {ruling.arbiterRationale && <p className="jd-rationale">{ruling.arbiterRationale}</p>}
+            </>
+          ) : <p className="jt-dim">Escalated to the arbiter…</p>}
+          {ruling.by && <p className="jt-dim mono jd-route">disputed by: {ruling.by}{ruling.reason ? ` — “${ruling.reason}”` : ''}</p>}
+          <p className="jt-dim jd-arbiter-note">Real UMA / Kleros arbitration (bonds, multi-hour windows, independent voters) is roadmap — this demo arbiter re-reads the same evidence and only overturns when the evidence backs the disputer.</p>
+        </div>
+      )}
 
       {/* Per-job proof links. */}
       <div className="jd-panel">
