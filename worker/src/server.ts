@@ -5,6 +5,7 @@ import { streamRouter } from './routes/stream.js';
 import { demoRouter } from './routes/demo.js';
 import { tasksRouter } from './routes/tasks.js';
 import { tryRouter } from './routes/try.js';
+import { evaluateRouter } from './routes/evaluate.js';
 import { jobsRouter } from './routes/jobs.js';
 import { relayerRouter } from './routes/relayer.js';
 import { faucetRouter } from './routes/faucet.js';
@@ -38,6 +39,7 @@ app.use(streamRouter);
 app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
+app.use(evaluateRouter);
 app.use(jobsRouter);
 // WS7: gasless relayer — submits a human's pre-signed EIP-3009 authorization so the human pays no gas.
 app.use(relayerRouter);
