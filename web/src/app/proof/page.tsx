@@ -29,7 +29,7 @@ export default async function ProofPage() {
         getEvidenceBundle(top.workId),
       ]);
       const recomputed = bundle ? hashEvidence(bundle) : '';
-      const onchainHash = (onchain as { evidenceHash: string }).evidenceHash ?? '';
+      const onchainHash = onchain.evidenceHash ?? ''; // now correctly decoded (13-field ABI)
       const equal =
         !!recomputed &&
         onchainHash.toLowerCase() === recomputed.toLowerCase() &&
