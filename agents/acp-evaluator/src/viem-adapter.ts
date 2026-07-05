@@ -74,7 +74,8 @@ export class ViemEoaProviderAdapter implements IEvmProviderAdapter {
     }
   }
 
-  // Send one call and wait for it to be mined; returns the tx hash.
+  // Send one call and wait for it to be mined; returns the tx hash. Logs each hash so the live run is
+  // observable (and so the ERC-20 approve tx, which isn't an ACP-contract event, is still captured).
   private async sendOne(call: Call): Promise<Address> {
     const tx = callToTx(call);
     const hash = await this.walletClient.sendTransaction({
@@ -82,6 +83,8 @@ export class ViemEoaProviderAdapter implements IEvmProviderAdapter {
       data: tx.data,
       value: tx.value,
     });
+    const short = `${this.account.address.slice(0, 6)}…${this.account.address.slice(-4)}`;
+    console.log(`[viem-eoa ${short}] tx ${hash} → ${tx.to}`);
     await this.publicClient.waitForTransactionReceipt({ hash });
     return hash as Address;
   }
