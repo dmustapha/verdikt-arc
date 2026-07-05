@@ -17,16 +17,16 @@ function requireEnv(name: string): string {
   return v;
 }
 
-// Pull the acceptance JSON Schema for the structured-data service off the job. The buyer's requirement is
-// a JSON object carrying `{ schema: <JSON Schema> }` (or the schema itself). Kept lenient so a live job's
-// exact requirement shape needs at most a one-line tweak here — everything else is transport-generic.
+// Pull the acceptance JSON Schema for the structured-data service off the job. The buyer embeds the service
+// contract in the ACP job `description` as JSON — `{ service, schema, prompt }` — so the schema Verdikt
+// judges against is the job's own on-chain contract, not a private constant. Kept lenient: a description
+// that is already the bare schema, or nests it under `jsonSchema`, also resolves.
 function extractSchema(job: JobSession['job']): Record<string, unknown> | null {
-  const req: unknown = (job as { requirement?: unknown; serviceRequirement?: unknown } | undefined)?.requirement
-    ?? (job as { serviceRequirement?: unknown } | undefined)?.serviceRequirement;
-  let obj: Record<string, unknown> | null = null;
-  if (typeof req === 'string') { try { obj = JSON.parse(req); } catch { obj = null; } }
-  else if (req && typeof req === 'object') obj = req as Record<string, unknown>;
-  if (!obj) return null;
+  const description = job?.description;
+  if (typeof description !== 'string' || !description.trim()) return null;
+  let obj: Record<string, unknown>;
+  try { obj = JSON.parse(description) as Record<string, unknown>; } catch { return null; }
+  if (!obj || typeof obj !== 'object') return null;
   const schema = (obj.schema ?? obj.jsonSchema ?? (obj.type ? obj : null)) as Record<string, unknown> | null;
   return schema && typeof schema === 'object' ? schema : null;
 }
@@ -55,9 +55,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    // The job.submitted event carries the deliverable string directly (guaranteed present); fall back to the
+    // freshly-fetched job if ever absent.
+    const deliverable = entry.event.deliverable ?? job.deliverable;
     console.log(`[verdikt-acp] [job ${session.jobId}] deliverable submitted — judging with Verdikt…`);
     try {
-      const r = await evaluateSubmitted({ deliverable: job.deliverable, jsonSchema: schema }, session);
+      const r = await evaluateSubmitted({ deliverable, jsonSchema: schema }, session);
       console.log(`[verdikt-acp] [job ${session.jobId}] verdict=${r.verdict} → ${r.approve ? 'COMPLETE' : 'REJECT'} (${r.reason.slice(0, 80)})`);
     } catch (e) {
       console.error(`[verdikt-acp] [job ${session.jobId}] evaluation error — rejecting to be safe:`, e instanceof Error ? e.message : e);
