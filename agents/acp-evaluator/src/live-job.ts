@@ -21,7 +21,7 @@ import { ViemEoaProviderAdapter } from './viem-adapter.js';
 import { buildJobDescription, VALID_DELIVERABLE, INVALID_DELIVERABLE, SERVICE_NAME } from './service-spec.js';
 
 const CHAIN_ID = base.id; // 8453
-const BUDGET_USDC = Number(process.env.LIVE_BUDGET_USDC ?? 0.01);
+const BUDGET_USDC = Number(process.env.LIVE_BUDGET_USDC ?? 0.1); // matches the SDK's documented example value
 const ACP_CONTRACT = '0x238E541BfefD82238730D00a2208E5497F1832E0' as Address; // ACP core, Base mainnet
 const TIMEOUT_MS = Number(process.env.LIVE_TIMEOUT_MS ?? 240_000);
 
