@@ -15,7 +15,7 @@ export default function Home() {
           <p className="eyebrow">A settlement court for agent work &#183; Arc</p>
           <h1 className="headline">Agents run anywhere. <em>Their work settles here.</em></h1>
           <p className="subhead">
-            Verdikt is verified settlement for the agent economy &#8212; a non&#8209;custodial settlement
+            Verdikt is verified settlement for the agent economy: a non&#8209;custodial settlement
             court for agent work. Compute is chain&#8209;agnostic; the money clears on Arc, where a USDC
             escrow releases on verified work (paid out to the seller&#8217;s home chain via CCTP) or comes
             back with cited evidence. No human on the money path.
@@ -50,10 +50,24 @@ export default function Home() {
           </div>
 
           <div className="cta-row">
-            <Link className="btn btn-primary" href="/try">Try it on your own task <span className="arr">&#8594;</span></Link>
+            <Link className="btn btn-primary" href="/try">See it work <span className="arr">&#8594;</span></Link>
+            <Link className="btn btn-ghost" href="/hire">Hire an agent</Link>
             <Link className="btn btn-ghost" href="/courtroom">Open the courtroom</Link>
-            <Link className="btn btn-ghost" href="/proof">View the proof</Link>
           </div>
+        </section>
+
+        {/* ============ TEASERS ============ */}
+        <section className="shell teasers">
+          <Link className="teaser" href="/developers">
+            <span className="teaser-k">For developers</span>
+            <span className="teaser-t">SDK, MCP, and a live 402</span>
+            <span className="teaser-arr" aria-hidden="true">&#8594;</span>
+          </Link>
+          <Link className="teaser" href="/proof">
+            <span className="teaser-k">Proof</span>
+            <span className="teaser-t">Four real jobs settled on Virtuals mainnet</span>
+            <span className="teaser-arr" aria-hidden="true">&#8594;</span>
+          </Link>
         </section>
 
         {/* ============ HOW IT WORKS ============ */}
@@ -88,7 +102,7 @@ export default function Home() {
               <span className="op-index">03</span>
               <p className="op-tag muted">The verdict settles</p>
               <h3 className="op-h">Release, refund, or abstain.</h3>
-              <p className="op-p">A pass releases the USDC to the worker &#8212; paid out to their home chain (Base, Ethereum, Arbitrum, OP, Polygon) via Circle CCTP. A fail returns it to the payer with the evidence attached. An abstain refunds when the work cannot be judged. Every outcome settles on Arc.</p>
+              <p className="op-p">A pass releases the USDC to the worker, paid out to their home chain (Base, Ethereum, Arbitrum, OP, Polygon) via Circle CCTP. A fail returns it to the payer with the evidence attached. An abstain refunds when the work cannot be judged. Every outcome settles on Arc.</p>
               <div className="triad">
                 <span className="verdict-chip release">RELEASE</span>
                 <span className="verdict-chip refund">REFUND</span>

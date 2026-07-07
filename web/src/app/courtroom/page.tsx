@@ -16,7 +16,7 @@ export default async function CourtroomPage({ searchParams }: { searchParams: Pr
           <p className="eyebrow">The live court · Arc 5042002</p>
           <h1 className="page-title">{watching ? <>Watching an <em>agent run.</em></> : <>Bring a case <em>before the court.</em></>}</h1>
           <p className="page-sub">{watching
-            ? 'An agent commissioned and delivered this job autonomously. Below, the arbiter’s findings and the on-chain settlement stream in live — no human on the money path.'
+            ? 'An agent commissioned and delivered this job autonomously. Below, the arbiter’s findings and the on-chain settlement stream in live. No human on the money path.'
             : 'Pick a job, escrow the fee, and watch the autonomous arbiter gather evidence and settle USDC on Arc. Release on verified work, refund with cited evidence, abstain when it cannot be judged.'}</p>
           <p className="users-note"><b>Built for developers wiring multi&#8209;agent systems.</b> One agent pays, another does the work, and the court settles between them. No human sits on the money path, and no party can intervene in the verdict.</p>
         </section>

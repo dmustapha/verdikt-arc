@@ -13,6 +13,15 @@ const verdictClass = (v: string) => (v === 'pass' ? 'v-release' : v === 'abstain
 
 const short = (h?: string | null) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '—');
 
+// Virtuals ACP jobs settled on Base mainnet — Verdikt as the registered evaluator. Real on-chain rows.
+const ACP_JOBS: { id: string; outcome: string; cls: string; detail?: string; url: string }[] = [
+  { id: '65569', outcome: 'released', cls: 'v-release', detail: 'JobCompleted + EvaluatorFeePaid', url: 'https://basescan.org/tx/0x6dcba82ed17cf745b7cbb31790c5b2047d162947dbc67e426955833f7d4ae2aa' },
+  { id: '65570', outcome: 'refunded', cls: 'v-refund', detail: 'JobRejected + Refunded', url: 'https://basescan.org/tx/0xf8494167d20d11c2b17628983ad55013d873f2c76e8d3d67b6084677489bbed4' },
+  { id: '65927', outcome: 'released', cls: 'v-release', url: 'https://basescan.org/tx/0x5ee1880d7bb193093a728c7af5a899030aedb5683ee48ffad0a69c4866fc7105' },
+  { id: '65928', outcome: 'refunded', cls: 'v-refund', url: 'https://basescan.org/tx/0xae760243380a6fca7346bf35580b5905909df27083165e3783ff4f1cd40e0050' },
+];
+const txShort = (url: string) => { const h = url.split('/tx/')[1] ?? ''; return h ? `${h.slice(0, 12)}… ↗` : '↗'; };
+
 export default async function ProofPage() {
   const [rows, fees] = await Promise.all([getLedger(20), getExternalFeeSum()]);
   const escrow = process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x96c47a608218E1aFea36E37f9619FB83E24CDF77';
@@ -59,6 +68,74 @@ export default async function ProofPage() {
           </p>
         </section>
 
+        {/* Virtuals ACP — real mainnet settlements gated by Verdikt's verdict */}
+        <section className="shell" style={{ paddingTop: 8, paddingBottom: 8 }}>
+          <div className="pf-card">
+            <div className="pf-label">Virtuals ACP · Base mainnet</div>
+            <p className="pf-muted" style={{ marginBottom: 14, lineHeight: 1.6 }}>
+              Verdikt is a registered evaluator on Virtuals&apos; Agent Commerce Protocol on Base mainnet.
+              Real USDC, gated by Verdikt&apos;s verdict.
+            </p>
+            <ul className="pf-list">
+              {ACP_JOBS.map((j) => (
+                <li key={j.id} className="pf-row">
+                  <span className="pf-meta">
+                    <strong className={`pf-verdict ${j.cls}`}>Job {j.id}</strong>
+                    {' → '}{j.outcome}
+                    {j.detail && <span className="pf-amt"> ({j.detail})</span>}
+                  </span>
+                  <a className="pf-tx" href={j.url} target="_blank" rel="noreferrer">{txShort(j.url)}</a>
+                </li>
+              ))}
+            </ul>
+            <p className="pf-muted" style={{ marginTop: 14 }}>
+              Per job: <span className="pf-amt">buyer -0.02 · provider +0.018 · evaluator +0.001 USDC</span>.
+              {' '}Evaluator{' '}
+              <a className="pf-tx" href="https://basescan.org/address/0xed6c93b309477ebedd6717f94700f3c008470584" target="_blank" rel="noreferrer">0xed6c…0584 ↗</a>
+            </p>
+          </div>
+
+          {/* ERC-8004 — portable on-chain reputation on the canonical Validation Registry */}
+          <div className="pf-card">
+            <div className="pf-label">ERC-8004 attestation</div>
+            <p className="pf-muted" style={{ marginBottom: 14, lineHeight: 1.6 }}>
+              Every verdict is attested on-chain to the canonical ERC-8004 Validation Registry. Portable,
+              verifiable reputation, not a self-reported score.
+            </p>
+            <ul className="pf-list">
+              <li className="pf-row">
+                <span className="pf-meta">Validation Registry <span className="pf-amt">(v2.0.0)</span></span>
+                <a className="pf-tx" href="https://sepolia.basescan.org/address/0x8004Cb1BF31DAf7788923b405b754f57acEB4272" target="_blank" rel="noreferrer">0x8004…4272 ↗</a>
+              </li>
+              <li className="pf-row">
+                <span className="pf-meta">Registered agent NFT</span>
+                <span className="pf-tx" style={{ borderBottom: 0 }}>agentId 7396</span>
+              </li>
+              <li className="pf-row">
+                <span className="pf-meta">Dedicated validator key</span>
+                <span className="pf-tx" style={{ borderBottom: 0 }}>0xa41FD309…</span>
+              </li>
+              <li className="pf-row">
+                <span className="pf-meta">Tag</span>
+                <span className="pf-tx" style={{ borderBottom: 0 }}>verdikt:release</span>
+              </li>
+            </ul>
+            <p className="pf-muted" style={{ marginTop: 14, marginBottom: 8 }}>
+              Example attestation for Arc settlement <code>0x7edb408e…</code>:
+            </p>
+            <ul className="pf-list">
+              <li className="pf-row">
+                <span className="pf-meta">validationResponse tx</span>
+                <a className="pf-tx" href="https://sepolia.basescan.org/tx/0x7a8283876ffc9e2827222e3b69c901062f0bd7375e03a2aaabd953a7cb94fec8" target="_blank" rel="noreferrer">0x7a8283…4fec8 ↗</a>
+              </li>
+              <li className="pf-row">
+                <span className="pf-meta">Agent NFT registration</span>
+                <a className="pf-tx" href="https://sepolia.basescan.org/tx/0x3f86794fad58647dd2ce2c949b3cab0cad5e99c49ef2d413d6c13c4a24dcefa3" target="_blank" rel="noreferrer">0x3f8679…dcefa3 ↗</a>
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <section className="shell" style={{ paddingBottom: 24 }}>
           {/* Escrow contract */}
           <div className="pf-card">
@@ -79,7 +156,7 @@ export default async function ProofPage() {
             </div>
             <p className="gw-note">
               Summed across <span className="gw-spend">{fees.count}</span> real metered{' '}
-              <code>/api/verdict</code> calls — each worker pays the arbiter a sub-cent x402 fee
+              <code>/api/verdict</code> calls. Each worker pays the arbiter a sub-cent x402 fee
               through Circle Gateway before a verdict is rendered. Self-serve demo runs are unmetered
               and excluded, so every fee here is a genuine third-party paid call.
             </p>
@@ -94,7 +171,7 @@ export default async function ProofPage() {
               <p className="pf-muted" style={{ marginBottom: 12 }}>
                 The latest verdict&apos;s evidence hash, from three independent sources for workId{' '}
                 <code>{short(roundTrip.workId)}</code>. Recomputed live in your browser from the
-                stored bundle — it is not read back from the database.
+                stored bundle. It is not read back from the database.
               </p>
               <ul className="pf-list">
                 <li className="pf-row"><span className="pf-meta">On-chain anchor (<code>getEscrow().evidenceHash</code>)</span><span className="pf-tx">{short(roundTrip.onchain)}</span></li>
@@ -103,8 +180,8 @@ export default async function ProofPage() {
               </ul>
               <p className="pf-muted" style={{ marginTop: 10 }}>
                 {roundTrip.equal
-                  ? 'All three are identical — the verdict cannot have been altered after settlement. An LLM can give an opinion; only a chain can give an independently-recomputable, immutable record.'
-                  : 'Hashes differ — investigate before trusting this verdict.'}
+                  ? 'All three are identical: the verdict cannot have been altered after settlement. An LLM can give an opinion; only a chain can give an independently-recomputable, immutable record.'
+                  : 'Hashes differ. Investigate before trusting this verdict.'}
               </p>
             </div>
           )}
@@ -115,7 +192,7 @@ export default async function ProofPage() {
               <div className="pf-label">One asset, end to end (why Arc)</div>
               <p className="pf-muted" style={{ marginBottom: 10 }}>
                 The latest settlement spent <strong>{gas.gasUsdc} USDC</strong> in gas
-                (<code>{gas.gasUsed}</code> gas units × the effective price), paid in USDC itself —
+                (<code>{gas.gasUsed}</code> gas units × the effective price), paid in USDC itself:
                 Arc&apos;s native asset.
               </p>
               <p className="pf-muted">
@@ -131,7 +208,7 @@ export default async function ProofPage() {
           <div className="pf-card">
             <div className="pf-label">Real settlements ({rows.length})</div>
             {rows.length === 0 ? (
-              <p className="pf-muted">No settled runs yet. Run the seed script.</p>
+              <p className="pf-muted">No settlements to show yet.</p>
             ) : (
               <ul className="pf-list">
                 {rows.map((r) => (
@@ -158,7 +235,7 @@ export default async function ProofPage() {
               chain; Arc is only the clearing house. Each corridor is a full 4-leg round-trip with
               the dest payout verified fee-net on-chain, both directions, across all five chains. */}
           <div className="pf-card">
-            <div className="pf-label">Cross-chain corridor matrix ({CORRIDORS.length}) — paid on your home chain</div>
+            <div className="pf-label">Cross-chain corridor matrix ({CORRIDORS.length}): paid on your home chain</div>
             <p className="pf-muted" style={{ marginBottom: 12 }}>
               Every corridor is a live CCTP V2 round-trip: <strong>burn</strong> on the source →{' '}
               <strong>mint + fund</strong> the escrow on Arc → <strong>settle + payout burn</strong> on Arc →{' '}

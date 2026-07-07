@@ -31,9 +31,9 @@ interface Seller {
 interface Step { key: string; text: string; tone: 'neutral' | 'good' | 'bad' | 'warn' | 'floor' }
 const TONE: Record<Step['tone'], string> = { neutral: '', good: 'good', bad: 'bad', warn: 'warn', floor: 'floor' };
 const SETTLE_SUB: Record<Outcome, string> = {
-  release: 'USDC released to the agent — the work passed',
-  refund: 'USDC refunded to you — the work failed',
-  abstain: 'Could not be judged — your USDC returned in full',
+  release: 'USDC released to the agent. The work passed.',
+  refund: 'USDC refunded to you. The work failed.',
+  abstain: 'Could not be judged. Your USDC returned in full.',
 };
 
 function randomWorkId(): `0x${string}` {
@@ -102,12 +102,12 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
   const onEvent = useCallback((raw: string) => {
     let ev: { type: string; data: Record<string, unknown> };
     try { ev = JSON.parse(raw); } catch { return; }
-    if (ev.type === 'artifact_received') push({ key: 'delivered', text: 'Agent delivered its work — verifying against your acceptance…', tone: 'neutral' });
+    if (ev.type === 'artifact_received') push({ key: 'delivered', text: 'Agent delivered its work. Verifying against your acceptance…', tone: 'neutral' });
     if (ev.type === 'route_selected') { push({ key: 'route', text: `Arbiter gathering evidence (route: ${ev.data.route})…`, tone: 'neutral' }); setStatus('verifying'); }
     if (ev.type === 'evidence_item') {
       const it = ev.data as { id?: string; label?: string; status?: string; detail?: string };
       const failed = it.status === 'fail' || it.status === 'error';
-      push({ key: `ev-${it.id}`, text: `${it.label}${it.detail ? ` — ${it.detail}` : ''} → ${String(it.status).toUpperCase()}`, tone: failed ? 'bad' : it.status === 'pass' ? 'good' : 'neutral' });
+      push({ key: `ev-${it.id}`, text: `${it.label}${it.detail ? `: ${it.detail}` : ''} → ${String(it.status).toUpperCase()}`, tone: failed ? 'bad' : it.status === 'pass' ? 'good' : 'neutral' });
     }
     if (ev.type === 'verdict') {
       const v = ev.data.verdict as VerdictLabel; setVerdict(v);
@@ -129,7 +129,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
   async function hire() {
     if (!address || !selected || !config || runningRef.current) return;
     if (wrongNetwork) { setError('Switch to Arc testnet first.'); return; }
-    if (balance === null) { setError('Still reading your balance — one moment, then try again.'); refetchBalance(); return; }
+    if (balance === null) { setError('Still reading your balance. One moment, then try again.'); refetchBalance(); return; }
     if (balance < TOTAL_USDC) { setError(`You need ${TOTAL_USDC} USDC. Use “Get test USDC”.`); return; }
     const built = config.buildAcceptance(inputs);
     if (!built.ok) { setError(built.error); return; }
@@ -187,21 +187,21 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
       if (!jRes.ok) throw new Error(jBody.error ?? 'dispatch failed');
       // WS8: capture the jobId so the buyer can leave and return to the dashboard mid-flight.
       if (jBody.jobId) { setTrackJobId(jBody.jobId); rememberJobId(jBody.jobId); }
-      setStatus('agent working…'); push({ key: 'awaiting', text: 'Agent is working — the verdict will settle automatically.', tone: 'neutral' });
+      setStatus('agent working…'); push({ key: 'awaiting', text: 'Agent is working. The verdict will settle automatically.', tone: 'neutral' });
       setBusy(false); // funding done; the async verdict/settle streams over SSE
       // Watchdog: if no verdict streams back in time (dead stream / slow or no-show seller), tell the
       // user the truth — the escrow is safe and auto-refunds at its deadline — instead of hanging.
       // A verdict (settled) or error calls stop(), which clears this timer — so if it fires, none arrived.
       if (watchdogRef.current) clearTimeout(watchdogRef.current);
       watchdogRef.current = setTimeout(() => {
-        push({ key: 'watchdog', text: 'No verdict yet — the agent may be slow or unreachable. Your escrow is safe and auto-refunds at its deadline; refresh to check later.', tone: 'warn' });
+        push({ key: 'watchdog', text: 'No verdict yet. The agent may be slow or unreachable. Your escrow is safe and auto-refunds at its deadline; refresh to check later.', tone: 'warn' });
         setStatus('no verdict yet'); stop();
       }, 150_000);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       // A rejected signature is a normal user action, not a failure.
       const rejected = /rejected|denied|User rejected/i.test(m);
-      push({ key: `flow-err`, text: rejected ? 'Signature rejected — nothing was charged.' : `Error: ${m}`, tone: rejected ? 'warn' : 'bad' });
+      push({ key: `flow-err`, text: rejected ? 'Signature rejected. Nothing was charged.' : `Error: ${m}`, tone: rejected ? 'warn' : 'bad' });
       setError(rejected ? null : m); setStatus(rejected ? 'idle' : 'error'); stop();
     }
   }
@@ -218,7 +218,7 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
           <div className="hw-connect">
             <div>
               <p className="hw-title">Connect a wallet to hire an agent</p>
-              <p className="hw-sub">You’ll pay only for verified-good work, and never pay gas — a relayer covers it.</p>
+              <p className="hw-sub">You’ll pay only for verified-good work, and never pay gas: a relayer covers it.</p>
             </div>
             <div className="hw-btns">
               {injected && <button className="btn btn-primary" onClick={() => connect({ connector: injected })} disabled={connecting}>Connect wallet</button>}
@@ -241,15 +241,23 @@ export function HireFlow({ sellers, escrow }: { sellers: Seller[]; escrow: `0x${
           </div>
         )}
         {faucetMsg && <p className="hw-note">{faucetMsg}</p>}
-        {wrongNetwork && <p className="hw-note warn">Wrong network — switch to Arc testnet to continue.</p>}
+        {wrongNetwork && <p className="hw-note warn">Wrong network. Switch to Arc testnet to continue.</p>}
       </section>
 
       {/* ── Catalog ────────────────────────────────────────────── */}
       <section className="hire-catalog">
         <p className="section-kicker">The catalog</p>
-        <h2 className="section-title">Pick an agent. It works, then gets paid — only if the work passes.</h2>
+        <h2 className="section-title">Pick an agent. It works, then gets paid, only if the work passes.</h2>
         {sellers.length === 0 ? (
-          <p className="hc-empty">No agents are listed right now. The catalog reads live from the registry.</p>
+          <div className="hc-grid" aria-busy="true">
+            {(['grounded-research', 'schema-extraction', 'code-fix'] as const).map((cap) => (
+              <div key={cap} className="hc-card" data-loading="true" aria-disabled="true">
+                <span className="hc-name">{CAPABILITY_NAME[cap] ?? cap}</span>
+                <span className="hc-cap mono">{cap}</span>
+                <span className="hc-spec">Loading the catalog from the registry…</span>
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="hc-grid">
             {sellers.map((s) => (
