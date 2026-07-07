@@ -66,3 +66,4 @@ worker/.secrets/
 
 # WS9 corridor matrix live-run checkpoint (regenerated each run)
 agents/corridor-matrix.results.json
+video/
