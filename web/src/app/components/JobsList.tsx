@@ -50,7 +50,7 @@ export function JobsList() {
           <div className="hw-connect">
             <div>
               <p className="hw-title">Connect the wallet you paid with</p>
-              <p className="hw-sub">Your jobs are looked up by the address that funded them — read live from Arc + the ledger.</p>
+              <p className="hw-sub">Your jobs are looked up by the address that funded them, read live from Arc + the ledger.</p>
             </div>
             <div className="hw-btns">
               {injected && <button className="btn btn-primary" onClick={() => connect({ connector: injected })} disabled={connecting}>Connect wallet</button>}

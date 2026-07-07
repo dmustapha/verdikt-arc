@@ -169,7 +169,7 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
               <div><dt>Deadline</dt><dd className="mono jt-dim">{new Date(d.chain.deadline).toLocaleString()}</dd></div>
               <div><dt>Escrow</dt><dd><a href={addressUrl(escrow)} target="_blank" rel="noreferrer" className="mono">{escrow.slice(0, 10)}… ↗</a></dd></div>
             </dl>
-          ) : <p className="jt-dim">Chain read unavailable right now — DB state shown above.</p>}
+          ) : <p className="jt-dim">Chain read unavailable right now. DB state shown above.</p>}
         </div>
 
         {/* Result view — the recorded verdict + the seller's delivered artifact. */}
@@ -192,7 +192,7 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
       {inWindow && (
         <div className="jd-panel jd-dispute">
           <p className="jd-panel-h">Challenge window <span className="jt-dim">· {countdown} left</span></p>
-          <p className="jd-rationale">This verdict is <b>held</b> — the escrow is still funded and nothing has settled. You can accept it (it settles automatically when the window closes) or dispute it now for an arbiter review.</p>
+          <p className="jd-rationale">This verdict is <b>held</b>: the escrow is still funded and nothing has settled. You can accept it (it settles automatically when the window closes) or dispute it now for an arbiter review.</p>
           <label className="jd-dispute-label" htmlFor="jd-dispute-reason">Reason (optional)</label>
           <textarea id="jd-dispute-reason" className="jd-dispute-input" rows={2}
             placeholder="Why should this verdict be reviewed?" value={disputeReason}
@@ -208,7 +208,7 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
       {ruling && (
         <div className="jd-panel jd-arbiter">
           <p className="jd-panel-h">Arbiter ruling
-            {ruling.arbiterMock && <span className="jd-mock-badge" title="A deterministic demo stand-in — not real decentralized arbitration. UMA / Kleros is the roadmap.">arbiter · mock</span>}</p>
+            {ruling.arbiterMock && <span className="jd-mock-badge" title="A deterministic demo stand-in, not real decentralized arbitration. UMA / Kleros is the roadmap.">arbiter · mock</span>}</p>
           {ruling.arbiterOutcome ? (
             <>
               <p className="jd-verdict" data-v={ruling.arbiterOutcome === 'release' ? 'pass' : ruling.arbiterOutcome === 'abstain' ? 'abstain' : ruling.arbiterOutcome === 'partial' ? 'partial' : 'fail'}>
@@ -218,8 +218,8 @@ export function JobDetail({ jobId, escrow }: { jobId: string; escrow: `0x${strin
               {ruling.arbiterRationale && <p className="jd-rationale">{ruling.arbiterRationale}</p>}
             </>
           ) : <p className="jt-dim">Escalated to the arbiter…</p>}
-          {ruling.by && <p className="jt-dim mono jd-route">disputed by: {ruling.by}{ruling.reason ? ` — “${ruling.reason}”` : ''}</p>}
-          <p className="jt-dim jd-arbiter-note">Real UMA / Kleros arbitration (bonds, multi-hour windows, independent voters) is roadmap — this demo arbiter re-reads the same evidence and only overturns when the evidence backs the disputer.</p>
+          {ruling.by && <p className="jt-dim mono jd-route">disputed by: {ruling.by}{ruling.reason ? `: “${ruling.reason}”` : ''}</p>}
+          <p className="jt-dim jd-arbiter-note">Real UMA / Kleros arbitration (bonds, multi-hour windows, independent voters) is roadmap. This demo arbiter re-reads the same evidence and only overturns when the evidence backs the disputer.</p>
         </div>
       )}
 

@@ -15,7 +15,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
   if (rows.length === 0)
     return (
       <div className="lg-wrap" style={{ padding: '26px 24px' }}>
-        <p className="lg-empty">No settled runs yet. Run the seed script.</p>
+        <p className="lg-empty">No settlements to show yet.</p>
       </div>
     );
   return (

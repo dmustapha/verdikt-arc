@@ -27,8 +27,8 @@ const PRESETS: Record<Route, {
 }> = {
   code: {
     label: 'Code', pill: 'sandbox + security scan',
-    verifies: 'Runs your code against YOUR pytest in a network-isolated sandbox + a static security scan (Bandit/Semgrep). A failing test or a security finding refunds — the deterministic floor cannot be talked out of it.',
-    criteriaLabel: 'Your acceptance tests (pytest — imports `solution`)',
+    verifies: 'Runs your code against YOUR pytest in a network-isolated sandbox + a static security scan (Bandit/Semgrep). A failing test or a security finding refunds. The deterministic floor cannot be talked out of it.',
+    criteriaLabel: 'Your acceptance tests (pytest, imports `solution`)',
     criteriaHint: 'No tests, no verdict. The payer’s tests are the definition of "good".',
     criteria: 'from solution import add\n\ndef test_add():\n    assert add(2, 3) == 5\n\ndef test_add_negative():\n    assert add(-1, 1) == 0\n',
     payloadLabel: 'The delivered code (written to solution.py)',
@@ -99,7 +99,7 @@ export function TryIt() {
   // Build the route-correct request body from the form, mirroring the worker's scope gate.
   function buildBody(workId: `0x${string}`): { ok: true; body: unknown } | { ok: false; error: string } {
     if (route === 'code') {
-      if (!criteria.trim()) return { ok: false, error: 'Add acceptance tests — no tests, no verdict.' };
+      if (!criteria.trim()) return { ok: false, error: 'Add acceptance tests. No tests, no verdict.' };
       return { ok: true, body: { workId, route, acceptance: { tests: criteria }, artifact: { payload, language } } };
     }
     if (route === 'tool_output') {
@@ -107,7 +107,7 @@ export function TryIt() {
       try { schema = JSON.parse(criteria); } catch { return { ok: false, error: 'Schema must be valid JSON.' }; }
       return { ok: true, body: { workId, route, acceptance: { schema }, artifact: { payload } } };
     }
-    if (!criteria.trim()) return { ok: false, error: 'Add sources — no sources, no verdict.' };
+    if (!criteria.trim()) return { ok: false, error: 'Add sources. No sources, no verdict.' };
     return { ok: true, body: { workId, route, acceptance: { sources: criteria }, artifact: { payload } } };
   }
 
@@ -128,7 +128,7 @@ export function TryIt() {
     const es = new EventSource(`${WORKER_BASE}/api/stream/${workId}`);
     esRef.current = es;
     streamLive.current = true;
-    watchdogRef.current = setTimeout(() => { if (streamLive.current) { setStatus('timed out — retry'); stop(); } }, 90000);
+    watchdogRef.current = setTimeout(() => { if (streamLive.current) { setStatus('timed out, retry'); stop(); } }, 90000);
 
     es.onopen = async () => {
       try {
@@ -198,7 +198,7 @@ export function TryIt() {
       }
     };
 
-    es.onerror = () => { if (streamLive.current) { setStatus('stream interrupted — retry'); stop(); } };
+    es.onerror = () => { if (streamLive.current) { setStatus('stream interrupted, retry'); stop(); } };
   }
 
   const settleState: Outcome | null =
@@ -213,7 +213,7 @@ export function TryIt() {
         <p className="try-boundary">
           Verdikt only judges what is checkable against <em>your</em> ground truth. Pick a route, supply the
           criteria, and a real escrow funds, settles, and links to Arcscan. Out-of-scope or unverifiable input
-          fails <strong>safe</strong> — it abstains and refunds, never a wrong release.
+          fails <strong>safe</strong>: it abstains and refunds, never a wrong release.
         </p>
 
         <div className="try-routes" role="group" aria-label="Pick a route">
@@ -268,7 +268,7 @@ export function TryIt() {
                 <div className="log-empty">
                   <span className="le-diamond" aria-hidden="true" />
                   <p className="le-text">Edit the task above and <em>run a real verdict.</em></p>
-                  <p className="le-sub">The escrow funds, the arbiter gathers evidence, and the outcome settles on Arc — no human in the loop.</p>
+                  <p className="le-sub">The escrow funds, the arbiter gathers evidence, and the outcome settles on Arc. No human in the loop.</p>
                 </div>
               ) : (
                 <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>

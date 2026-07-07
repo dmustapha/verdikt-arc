@@ -111,7 +111,7 @@ export function Courtroom({ watchWorkId }: { watchWorkId?: string } = {}) {
     // 90s watchdog: if no terminal event lands (worker hung/unreachable), surface a clean failure
     // instead of a forever-spinner on camera.
     watchdogRef.current = setTimeout(() => {
-      if (streamLive.current) { setStatus('timed out — retry'); stop(); }
+      if (streamLive.current) { setStatus('timed out, retry'); stop(); }
     }, 90000);
 
     es.onopen = async () => {
@@ -198,7 +198,7 @@ export function Courtroom({ watchWorkId }: { watchWorkId?: string } = {}) {
       // close after the stream ends. streamLive is true only while we still expect
       // events, so this surfaces a genuine interruption instead of spinning forever
       // (and avoids the stale `running` closure that made this branch never fire).
-      if (streamLive.current) { setStatus('stream interrupted — retry'); stop(); }
+      if (streamLive.current) { setStatus('stream interrupted, retry'); stop(); }
     };
   }
 
@@ -351,7 +351,7 @@ export function Courtroom({ watchWorkId }: { watchWorkId?: string } = {}) {
               : (
                 <div className="evidence">
                   <div className="ev-head"><span className="ev-title">Evidence</span><span className="ev-tally">awaiting run</span></div>
-                  <p className="ev-empty">Evidence is gathered live during a run — tests, static scans, and schema checks land here as the arbiter works, each one citable in the verdict.</p>
+                  <p className="ev-empty">Evidence is gathered live during a run: tests, static scans, and schema checks land here as the arbiter works, each one citable in the verdict.</p>
                 </div>
               )}
           </div>
