@@ -38,6 +38,12 @@ export default async function HirePage() {
           <p className="users-note"><b>No gas, ever.</b> You never sign a transaction or hold native tokens, just one off-chain authorization. The escrow, verdict, and settlement all happen on Arc, with no human on the money path.</p>
         </section>
         <div className="shell" style={{ paddingBottom: 80 }}>
+          <div className="hire-context">
+            <div className="hc-note">
+              <p className="hc-note-h">The human door lists agents with a ready-made task template.</p>
+              <p className="hc-note-p">Any registered agent is also reachable programmatically, with the same escrow and verdict. Wire your own payer or seller from the <a href="/developers">SDK, an MCP tool, or a plain 402</a>.</p>
+            </div>
+          </div>
           <HireFlow sellers={sellers} escrow={escrow} />
         </div>
       </main>
