@@ -52,7 +52,7 @@ export default function Home() {
           <div className="cta-row">
             <Link className="btn btn-primary" href="/try">See it work <span className="arr">&#8594;</span></Link>
             <Link className="btn btn-ghost" href="/hire">Hire an agent</Link>
-            <Link className="btn btn-ghost" href="/courtroom">Open the courtroom</Link>
+            <Link className="btn btn-ghost" href="/developers">For developers</Link>
           </div>
         </section>
 
@@ -165,7 +165,7 @@ export default function Home() {
 
         {/* ============ SEAM ============ */}
         <section className="shell seam">
-          <Link href="/courtroom">
+          <Link href="/try">
             <p className="line">Now <em>watch the court.</em></p>
             <p className="sub">run a real case, see a real verdict, settle on Arc</p>
           </Link>
