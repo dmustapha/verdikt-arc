@@ -1,10 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { EvidenceBundle, VerdictResult, VerdictLabel } from '../types.js';
 import { VERDICT_CODE } from '../types.js';
 import { confidenceToScore } from '../settlement/tiers.js';
 import { hashEvidence } from '../lib/hash.js';
-
-const MODEL = process.env.REASONER_MODEL ?? 'claude-sonnet-4-6';
+import { callTool } from './llm.js';
 
 const VERDICT_TOOL = {
   name: 'emit_verdict',
@@ -77,26 +75,22 @@ export async function reasonOverEvidence(bundle: EvidenceBundle): Promise<Verdic
     return base('fail', cited, 'deterministic floor: disqualifying evidence present', 0.95);
   }
 
-  // Route through global fetch: the SDK's bundled HTTP layer "Premature close"-es on tool_use
-  // responses inside the Fly VM, while global undici fetch works. Verified on the deployed host.
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
+  // The pluggable reasoner seam (Anthropic native or any OpenAI-compatible provider). The model is
+  // consulted ONLY to certify a pass over a silent floor — it can never overturn a deterministic fail.
   let parsed: { verdict: VerdictLabel; confidence: number; cited_evidence: string[]; rationale: string; abstain_reason?: string };
   try {
-    const res = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
+    const input = await callTool({
       system: SYSTEM,
-      tool_choice: { type: 'tool', name: 'emit_verdict' },
-      tools: [VERDICT_TOOL],
-      messages: [{ role: 'user', content: `EvidenceBundle:\n${JSON.stringify(bundle, null, 2)}` }],
+      tool: VERDICT_TOOL,
+      maxTokens: 1024,
+      userContent: `EvidenceBundle:\n${JSON.stringify(bundle, null, 2)}`,
     });
-    const block = res.content.find((b) => b.type === 'tool_use');
-    if (!block || block.type !== 'tool_use') {
+    if (!input) {
       // Floor is silent here (a fail already returned above). No structured output means we cannot
       // certify a pass → abstain. Never fabricate a pass on a clean-but-unverified bundle.
       return base('abstain', [], 'reasoner returned no structured verdict', 0.1, 'no structured output');
     }
-    parsed = block.input as typeof parsed;
+    parsed = input as typeof parsed;
   } catch (err) {
     // Floor is silent here (a fail already returned above). With Claude unavailable we cannot
     // certify a pass over silent evidence → abstain (refund-to-payer), never fabricate a pass.

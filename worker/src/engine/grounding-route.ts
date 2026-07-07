@@ -1,7 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Acceptance, Artifact, EvidenceBundle, EvidenceItem } from '../types.js';
-
-const MODEL = process.env.GROUNDING_MODEL ?? 'claude-sonnet-4-6';
+import { callTool } from './llm.js';
 
 const CLAIM_TOOL = {
   name: 'report_grounding',
@@ -26,30 +24,21 @@ export async function runGroundingRoute(acceptance: Acceptance, artifact: Artifa
     return { route: 'answer', items: [], routeError: 'payer provided no sources' };
   }
 
-  // See reasoner.ts: route through global fetch to avoid the SDK's "Premature close" on Fly.
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
-
   let toolInput: { key_claim: string; label: string; supporting_span: string };
   try {
-    const res = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      tool_choice: { type: 'tool', name: 'report_grounding' },
-      tools: [CLAIM_TOOL],
-      messages: [{
-        role: 'user',
-        content:
-          `SOURCES (the only ground truth):\n${acceptance.sources}\n\n` +
-          `ANSWER to verify:\n${artifact.payload}\n\n` +
-          `Find the answer's single key claim. Copy a verbatim supporting span from SOURCES if one exists. ` +
-          `If no verbatim span supports it, label unsupported. If you are unsure, label uncertain. Do not invent spans.`,
-      }],
+    const input = await callTool({
+      tool: CLAIM_TOOL,
+      maxTokens: 1024,
+      userContent:
+        `SOURCES (the only ground truth):\n${acceptance.sources}\n\n` +
+        `ANSWER to verify:\n${artifact.payload}\n\n` +
+        `Find the answer's single key claim. Copy a verbatim supporting span from SOURCES if one exists. ` +
+        `If no verbatim span supports it, label unsupported. If you are unsure, label uncertain. Do not invent spans.`,
     });
-    const block = res.content.find((b) => b.type === 'tool_use');
-    if (!block || block.type !== 'tool_use') {
+    if (!input) {
       return { route: 'answer', items: [], routeError: 'grounding model returned no structured result' };
     }
-    toolInput = block.input as typeof toolInput;
+    toolInput = input as typeof toolInput;
   } catch (err) {
     return { route: 'answer', items: [], routeError: `grounding API error: ${err instanceof Error ? err.message : String(err)}` };
   }

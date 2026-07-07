@@ -1,7 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Acceptance, Artifact, EvidenceBundle, EvidenceItem } from '../types.js';
-
-const MODEL = process.env.GROUNDING_MODEL ?? 'claude-sonnet-4-6';
+import { callTool } from './llm.js';
 
 // F1: upgrade the grounding route from a single key-claim + lexical-overlap gate to claim
 // DECOMPOSITION + per-claim ENTAILMENT + deterministic aggregation (RAGAS-faithfulness style).
@@ -16,9 +14,6 @@ export type EntailLabel = 'entailed' | 'not_entailed' | 'contradicted';
 export interface ClaimVerdict { claim: string; label: EntailLabel; span: string; score: number }
 
 function normalize(s: string): string { return s.toLowerCase().replace(/\s+/g, ' ').trim(); }
-function client(): Anthropic {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, fetch: (...a) => globalThis.fetch(...a) });
-}
 
 const DECOMPOSE_TOOL = {
   name: 'emit_claims',
@@ -54,29 +49,23 @@ const ENTAIL_TOOL = {
 };
 
 async function decompose(answer: string): Promise<string[]> {
-  const res = await client().messages.create({
-    model: MODEL, max_tokens: 1024, tool_choice: { type: 'tool', name: 'emit_claims' }, tools: [DECOMPOSE_TOOL],
-    messages: [{ role: 'user', content: `Decompose this answer into atomic factual claims:\n\n${answer}` }],
+  const input = await callTool({
+    tool: DECOMPOSE_TOOL, maxTokens: 1024,
+    userContent: `Decompose this answer into atomic factual claims:\n\n${answer}`,
   });
-  const block = res.content.find((b) => b.type === 'tool_use');
-  if (!block || block.type !== 'tool_use') return [];
-  const claims = (block.input as { claims?: string[] }).claims ?? [];
+  const claims = (input as { claims?: string[] } | null)?.claims ?? [];
   return claims.filter((c) => typeof c === 'string' && c.trim().length > 0).slice(0, 20);
 }
 
 // LLM entailment scorer (default). Returns a per-claim label + proposed span.
 async function entailLLM(sources: string, claims: string[]): Promise<Array<{ claim: string; label: EntailLabel; span: string }>> {
-  const res = await client().messages.create({
-    model: MODEL, max_tokens: 2048, tool_choice: { type: 'tool', name: 'emit_entailments' }, tools: [ENTAIL_TOOL],
-    messages: [{
-      role: 'user',
-      content: `SOURCES (the only ground truth):\n${sources}\n\nCLAIMS:\n${claims.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n` +
-        `For each claim, label entailed only if the SOURCES support it, contradicted if the SOURCES refute it, else not_entailed. Copy a verbatim span from SOURCES when entailed.`,
-    }],
+  const input = await callTool({
+    tool: ENTAIL_TOOL, maxTokens: 2048,
+    userContent: `SOURCES (the only ground truth):\n${sources}\n\nCLAIMS:\n${claims.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n` +
+      `For each claim, label entailed only if the SOURCES support it, contradicted if the SOURCES refute it, else not_entailed. Copy a verbatim span from SOURCES when entailed.`,
   });
-  const block = res.content.find((b) => b.type === 'tool_use');
-  if (!block || block.type !== 'tool_use') return claims.map((c) => ({ claim: c, label: 'not_entailed' as EntailLabel, span: '' }));
-  const results = (block.input as { results?: Array<{ claim: string; label: EntailLabel; supporting_span: string }> }).results ?? [];
+  if (!input) return claims.map((c) => ({ claim: c, label: 'not_entailed' as EntailLabel, span: '' }));
+  const results = (input as { results?: Array<{ claim: string; label: EntailLabel; supporting_span: string }> }).results ?? [];
   return claims.map((c) => {
     const r = results.find((x) => normalize(x.claim).includes(normalize(c).slice(0, 40)) || normalize(c).includes(normalize(x.claim).slice(0, 40)));
     return { claim: c, label: (r?.label ?? 'not_entailed') as EntailLabel, span: r?.supporting_span ?? '' };
