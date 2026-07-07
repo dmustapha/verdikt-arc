@@ -10,6 +10,7 @@ import { AcpAgent, PrivyAlchemyEvmProviderAdapter } from '@virtuals-protocol/acp
 import type { JobSession, JobRoomEntry } from '@virtuals-protocol/acp-node-v2';
 import { base } from 'viem/chains';
 import { evaluateSubmitted } from './judge.js';
+import type { VerdictRoute } from './judge.js';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -17,18 +18,41 @@ function requireEnv(name: string): string {
   return v;
 }
 
-// Pull the acceptance JSON Schema for the structured-data service off the job. The buyer embeds the service
-// contract in the ACP job `description` as JSON — `{ service, schema, prompt }` — so the schema Verdikt
-// judges against is the job's own on-chain contract, not a private constant. Kept lenient: a description
-// that is already the bare schema, or nests it under `jsonSchema`, also resolves.
-function extractSchema(job: JobSession['job']): Record<string, unknown> | null {
+const VALID_ROUTES: VerdictRoute[] = ['code', 'tool_output', 'answer', 'execution', 'tool_trace'];
+
+interface JobSpec {
+  route: VerdictRoute;
+  acceptance: Record<string, unknown>;
+  artifactExtra: Record<string, unknown>;
+}
+
+// Pull the verdict route + acceptance off the job. The buyer embeds the service contract in the ACP job
+// `description` as JSON. The route-flexible form is `{ service, route, acceptance, artifactExtra, prompt }`,
+// so Verdikt judges against whatever route the job actually asked for. Legacy jobs carried only a JSON Schema
+// (`{ service, schema, prompt }` / bare schema / `{ jsonSchema }`) — those resolve to the tool_output route so
+// the existing live jobs keep working unchanged.
+function extractSpec(job: JobSession['job']): JobSpec | null {
   const description = job?.description;
   if (typeof description !== 'string' || !description.trim()) return null;
   let obj: Record<string, unknown>;
   try { obj = JSON.parse(description) as Record<string, unknown>; } catch { return null; }
   if (!obj || typeof obj !== 'object') return null;
+
+  // Route-flexible form.
+  if (typeof obj.route === 'string' && VALID_ROUTES.includes(obj.route as VerdictRoute) && obj.acceptance && typeof obj.acceptance === 'object') {
+    return {
+      route: obj.route as VerdictRoute,
+      acceptance: obj.acceptance as Record<string, unknown>,
+      artifactExtra: (obj.artifactExtra as Record<string, unknown>) ?? {},
+    };
+  }
+
+  // Legacy tool_output form: a bare JSON Schema nested under schema/jsonSchema, or the description IS the schema.
   const schema = (obj.schema ?? obj.jsonSchema ?? (obj.type ? obj : null)) as Record<string, unknown> | null;
-  return schema && typeof schema === 'object' ? schema : null;
+  if (schema && typeof schema === 'object') {
+    return { route: 'tool_output', acceptance: { jsonSchema: schema }, artifactExtra: {} };
+  }
+  return null;
 }
 
 async function main(): Promise<void> {
@@ -48,19 +72,19 @@ async function main(): Promise<void> {
     // Only judge jobs where Verdikt is the named evaluator (third-party evaluation).
     if (!job || job.evaluatorAddress.toLowerCase() !== evaluatorAddress) return;
 
-    const schema = extractSchema(job);
-    if (!schema) {
-      console.warn(`[verdikt-acp] [job ${session.jobId}] no JSON Schema in the requirement — rejecting (unverifiable)`);
-      await session.reject('Verdikt: this evaluator verifies structured data; the job carried no JSON Schema to check against.');
+    const spec = extractSpec(job);
+    if (!spec) {
+      console.warn(`[verdikt-acp] [job ${session.jobId}] no verifiable route/acceptance in the requirement — rejecting (unverifiable)`);
+      await session.reject('Verdikt: this evaluator verifies against a declared route + acceptance criteria; the job carried none to check against.');
       return;
     }
 
     // The job.submitted event carries the deliverable string directly (guaranteed present); fall back to the
     // freshly-fetched job if ever absent.
     const deliverable = entry.event.deliverable ?? job.deliverable;
-    console.log(`[verdikt-acp] [job ${session.jobId}] deliverable submitted — judging with Verdikt…`);
+    console.log(`[verdikt-acp] [job ${session.jobId}] deliverable submitted (route=${spec.route}) — judging with Verdikt…`);
     try {
-      const r = await evaluateSubmitted({ deliverable, jsonSchema: schema }, session);
+      const r = await evaluateSubmitted({ deliverable, route: spec.route, acceptance: spec.acceptance, artifactExtra: spec.artifactExtra }, session);
       console.log(`[verdikt-acp] [job ${session.jobId}] verdict=${r.verdict} → ${r.approve ? 'COMPLETE' : 'REJECT'} (${r.reason.slice(0, 80)})`);
     } catch (e) {
       console.error(`[verdikt-acp] [job ${session.jobId}] evaluation error — rejecting to be safe:`, e instanceof Error ? e.message : e);

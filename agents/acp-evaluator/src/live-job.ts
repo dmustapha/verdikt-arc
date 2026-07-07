@@ -18,7 +18,8 @@ import type { JobSession, JobRoomEntry } from '@virtuals-protocol/acp-node-v2';
 import { createPublicClient, http, parseEventLogs, type Hex, type Address } from 'viem';
 import { base } from 'viem/chains';
 import { ViemEoaProviderAdapter } from './viem-adapter.js';
-import { buildJobDescription, VALID_DELIVERABLE, INVALID_DELIVERABLE, SERVICE_NAME } from './service-spec.js';
+import { buildJobDescription, SERVICE_SPECS, ROUTES } from './service-spec.js';
+import type { VerdictRoute } from './judge.js';
 
 const CHAIN_ID = base.id; // 8453
 const BUDGET_USDC = Number(process.env.LIVE_BUDGET_USDC ?? 0.02); // tiny; round-trips between our own wallets
@@ -33,9 +34,21 @@ function requireEnv(name: string): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+function parseRoute(): VerdictRoute {
+  const i = process.argv.indexOf('--route');
+  if (i === -1) return 'tool_output'; // default = the route the existing live jobs used
+  const r = process.argv[i + 1];
+  if (!r || !ROUTES.includes(r as VerdictRoute)) {
+    throw new Error(`--route must be one of: ${ROUTES.join(', ')} (got ${r ?? 'nothing'})`);
+  }
+  return r as VerdictRoute;
+}
+
 async function main(): Promise<void> {
   const wantReject = process.argv.includes('--invalid');
-  const deliverable = wantReject ? INVALID_DELIVERABLE : VALID_DELIVERABLE;
+  const route = parseRoute();
+  const spec = SERVICE_SPECS[route];
+  const deliverable = wantReject ? spec.invalid : spec.valid;
   const evaluatorAddress = requireEnv('ACP_WALLET_ADDRESS') as Address; // the registered Verdikt agent
   const sellerAddress = requireEnv('LIVE_SELLER_ADDRESS') as Address;
 
@@ -95,12 +108,12 @@ async function main(): Promise<void> {
   const fromBlock = await publicClient.getBlockNumber();
   const expiredAt = Math.floor(Date.now() / 1000) + 3600;
 
-  console.log(`\n[buyer]   creating job — service="${SERVICE_NAME}" provider=${sellerAddress} evaluator=${evaluatorAddress}`);
+  console.log(`\n[buyer]   creating job — route="${route}" service="${spec.service}" deliverable=${wantReject ? 'INVALID' : 'valid'} provider=${sellerAddress} evaluator=${evaluatorAddress}`);
   const jobId = await buyer.createJob(CHAIN_ID, {
     providerAddress: sellerAddress,
     evaluatorAddress,
     expiredAt,
-    description: buildJobDescription(),
+    description: buildJobDescription(spec),
   });
   console.log(`[buyer]   ✅ on-chain job id = ${jobId}\n`);
 
