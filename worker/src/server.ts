@@ -12,6 +12,7 @@ import { faucetRouter } from './routes/faucet.js';
 import { makeSellersRouter } from './routes/sellers.js';
 import { makeCallbackRouter } from './routes/callback.js';
 import { evidenceRouter } from './routes/evidence.js';
+import { makeX402BazaarRouter } from './routes/x402-bazaar.js';
 import { enableEvidencePersistence } from './lib/evidence-store.js';
 import { enableAttestation } from './lib/attestor.js';
 import { engine, startWorkerKeeper } from './lib/engine-instance.js';
@@ -40,6 +41,9 @@ app.use(demoRouter);
 app.use(tasksRouter);
 app.use(tryRouter);
 app.use(evaluateRouter);
+// Phase 1: Verdikt as a walk-up paid service on the x402 Bazaar (CDP facilitator, Base mainnet).
+// Self-disables unless CDP_API_KEY_ID/SECRET + VERDIKT_PAYTO are set, so it never breaks other envs.
+app.use(makeX402BazaarRouter());
 app.use(jobsRouter);
 // WS7: gasless relayer — submits a human's pre-signed EIP-3009 authorization so the human pays no gas.
 app.use(relayerRouter);

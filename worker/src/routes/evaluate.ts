@@ -27,33 +27,43 @@ function approveFor(verdict: string): boolean {
   return verdict === 'pass' || verdict === 'partial';
 }
 
-// POST /api/evaluate  body: { route, acceptance, artifact } — same shape as /api/try minus the money.
-evaluateRouter.post('/api/evaluate', async (req, res) => {
-  const limited = rateLimit(clientIp(req), Date.now());
-  if (limited) { res.status(429).json({ error: limited }); return; }
-
-  const body = (req.body ?? {}) as Record<string, unknown>;
+// The pure verdict over a { route, acceptance, artifact } body — no escrow, no settlement, no DB. Shared by
+// the public /api/evaluate route AND the paid x402 Bazaar endpoint (routes/x402-bazaar.ts), so both surfaces
+// render byte-identical verdicts through the same brain. Returns an HTTP status + response payload; the
+// caller owns transport (rate-limit, payment gating, headers).
+export async function evaluateDeliverable(body: Record<string, unknown>): Promise<{ status: number; payload: Record<string, unknown> }> {
   const route = body.route as ArtifactType;
-  if (!ROUTES.includes(route)) { res.status(400).json({ error: `route must be one of: ${ROUTES.join(', ')}` }); return; }
+  if (!ROUTES.includes(route)) return { status: 400, payload: { error: `route must be one of: ${ROUTES.join(', ')}` } };
 
   const built = buildTask(route, body); // SCOPE gate: rejects a route with no ground truth (no false verdicts)
-  if (typeof built === 'string') { res.status(400).json({ error: built }); return; }
+  if (typeof built === 'string') return { status: 400, payload: { error: built } };
 
   try {
     const task: Task = { workId: SYNTHETIC, type: route, acceptance: built.acceptance, payer: ZERO_ADDR, worker: ZERO_ADDR, amountUsdc: 0 };
     const { verdict, bundle } = await evaluateArtifact(task, built.artifact);
-    res.json({
-      verdict: verdict.verdict,                 // pass | fail | partial | abstain
-      approve: approveFor(verdict.verdict),     // the binary an ACP evaluator maps onto complete/reject
-      confidence: verdict.confidence,
-      score: verdict.score,
-      rationale: verdict.rationale,
-      abstainReason: verdict.abstainReason ?? null,
-      evidenceHash: verdict.evidenceHash,
-      route: verdict.route,
-      evidence: bundle.items,                   // the cited findings, so the caller can attach real reasons
-    });
+    return {
+      status: 200,
+      payload: {
+        verdict: verdict.verdict,                 // pass | fail | partial | abstain
+        approve: approveFor(verdict.verdict),     // the binary an ACP evaluator maps onto complete/reject
+        confidence: verdict.confidence,
+        score: verdict.score,
+        rationale: verdict.rationale,
+        abstainReason: verdict.abstainReason ?? null,
+        evidenceHash: verdict.evidenceHash,
+        route: verdict.route,
+        evidence: bundle.items,                   // the cited findings, so the caller can attach real reasons
+      },
+    };
   } catch (err) {
-    res.status(502).json({ error: `evaluation failed: ${err instanceof Error ? err.message : String(err)}` });
+    return { status: 502, payload: { error: `evaluation failed: ${err instanceof Error ? err.message : String(err)}` } };
   }
+}
+
+// POST /api/evaluate  body: { route, acceptance, artifact } — same shape as /api/try minus the money.
+evaluateRouter.post('/api/evaluate', async (req, res) => {
+  const limited = rateLimit(clientIp(req), Date.now());
+  if (limited) { res.status(429).json({ error: limited }); return; }
+  const { status, payload } = await evaluateDeliverable((req.body ?? {}) as Record<string, unknown>);
+  res.status(status).json(payload);
 });
