@@ -17,6 +17,14 @@ const MCP_TOOLS: { name: string; desc: string }[] = [
   { name: 'verdikt_check_escrow', desc: 'Read the on-chain escrow state for a workId. No wallet needed.' },
 ];
 
+const BAZAAR_SNIPPET = `const client = new x402Client(select)
+  .register('eip155:8453', new ExactEvmScheme(signer))
+const pay = wrapFetchWithPayment(fetch, client)
+const res = await pay('https://verdikt-worker.fly.dev/x402/verify', {
+  method: 'POST', body: JSON.stringify({ route, acceptance, artifact }),
+})
+// 402 -> sign 0.05 USDC (EIP-3009) -> 200 verdict + on-chain settlement tx`;
+
 export default function DevelopersPage() {
   return (
     <div className="wrap">
@@ -67,6 +75,25 @@ export default function DevelopersPage() {
             the verdict settles on-chain. Verdikt runs its own x402 facilitator on Arc, because none existed.
           </p>
           <X402Probe />
+        </section>
+
+        {/* ============ x402 BAZAAR (Base mainnet) ============ */}
+        <section className="shell dev-sec">
+          <p className="section-kicker">x402 Bazaar</p>
+          <h2 className="section-title">Or discover and pay on Base mainnet</h2>
+          <p className="dev-caption" style={{ marginTop: 0, marginBottom: 20 }}>
+            Verdikt is a walk-up paid service on the Coinbase x402 Bazaar. Any agent discovers the terms, pays
+            a 0.05 USDC fee over a standard HTTP 402 handshake on Base mainnet, and gets a verdict back. No
+            counterparty, no permission, no escrow. Same engine as the SDK and MCP paths.
+          </p>
+          <pre className="dev-pre mono">{BAZAAR_SNIPPET}</pre>
+          <p className="dev-caption">
+            Proven live: a paying client settled 0.05 USDC on Base and received a pass verdict.{' '}
+            <a href="https://basescan.org/tx/0x57e291ebcb31a3ce9a6ceadfa3991fd503d40073263dfdae1649f36b6c5da2a6" target="_blank" rel="noreferrer">
+              Settlement on Basescan
+            </a>
+            .
+          </p>
         </section>
 
         <SiteFooter />
